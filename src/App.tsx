@@ -145,7 +145,7 @@ function Filter({ label, wide = false }: { label: string; wide?: boolean }) {
   return <div className={`filter-control ${wide ? "wide" : ""}`} role="button" tabIndex={0}>{wide && <Icon name="search" size={16}/>}<span>{label}</span>{!wide && <span className="filter-caret">⌄</span>}</div>;
 }
 
-function Sidebar({ screen, setScreen, compact, setCompact }: { screen: string; setScreen: (s: string) => void; compact: boolean; setCompact: (v: boolean) => void }) {
+function Sidebar({ screen, setScreen, compact, setCompact, analystName }: { screen: string; setScreen: (s: string) => void; compact: boolean; setCompact: (v: boolean) => void; analystName: string }) {
   return <aside className={`sidebar ${compact ? "compact" : ""}`}>
     <div className="brand">
       <div className="brand-mark"><Icon name="shield" size={22}/></div>
@@ -159,8 +159,8 @@ function Sidebar({ screen, setScreen, compact, setCompact }: { screen: string; s
     <div className="side-spacer"/>
     <div className="system-card"><div className="system-line"><span className="live-dot"/><span>SYSTEM ONLINE</span></div><div className="system-meta">Models · API · Graph</div></div>
     <div className="analyst">
-      <div className="avatar">AS</div>
-      <div className="analyst-copy"><strong>Arjun Shah</strong><span>Senior Fraud Analyst</span></div>
+      <div className="avatar">{analystName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div>
+      <div className="analyst-copy"><strong>{analystName}</strong><span>Senior Fraud Analyst</span></div>
       <Icon name="chevron" size={14}/>
     </div>
   </aside>;
@@ -448,6 +448,7 @@ function TransactionEntry({ onBack, onScored }: { onBack: () => void; onScored: 
 function CsvUpload({ onBack }: { onBack: () => void }) {
   const [fileName, setFileName] = useState("");
   const [preview, setPreview] = useState<string[][]>([]);
+  const [parsedRows, setParsedRows] = useState<string[][]>([]);
   const [error, setError] = useState("");
   const required = transactionFields.map(({ key }) => key);
   const parseCsv = (text: string) => text.trim().split(/\r?\n/).map((line) => line.split(",").map((cell) => cell.trim()));
@@ -460,8 +461,8 @@ function CsvUpload({ onBack }: { onBack: () => void }) {
       const rows = parseCsv(String(reader.result || ""));
       const headers = rows[0] || [];
       const missing = required.filter((column) => !headers.includes(column));
-      if (missing.length) { setPreview([]); setError(`INVALID CSV FORMAT — Missing columns: ${missing.join(", ")}`); return; }
-      setPreview(rows.slice(0, 6));
+      if (missing.length) { setPreview([]); setParsedRows([]); setError(`INVALID CSV FORMAT — Missing columns: ${missing.join(", ")}`); return; }
+      setParsedRows(rows); setPreview(rows.slice(0, 6));
     };
     reader.onerror = () => setError("Unable to read this CSV file.");
     reader.readAsText(file);
@@ -724,7 +725,7 @@ function HomePage({ onNavigate }: { onNavigate: (page: EntryPage) => void }) {
   </EntryShell>;
 }
 
-function LoginPage({ onNavigate, onSuccess }: { onNavigate: (page: EntryPage) => void; onSuccess: () => void }) {
+function LoginPage({ onNavigate, onSuccess }: { onNavigate: (page: EntryPage) => void; onSuccess: (email: string) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
@@ -734,7 +735,7 @@ function LoginPage({ onNavigate, onSuccess }: { onNavigate: (page: EntryPage) =>
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError("Enter a valid analyst email.");
     if (!password) return setError("Password is required.");
     setError("");
-    onSuccess();
+    onSuccess(email);
   };
   return <EntryShell onNavigate={onNavigate}>
     <main className="auth-main">
@@ -787,12 +788,18 @@ function SecureTransition({ onComplete }: { onComplete: () => void }) {
   return <div className="transition-screen"><div className="transition-card"><div className="brand-mark"><Icon name="shield" size={24} /></div><div className="eyebrow cyan">FININTEL</div><h1>SECURE SESSION ESTABLISHED</h1><div className="transition-checks"><span>✓ Identity verified</span><span>✓ Fraud intelligence engine connected</span><span>✓ Network analysis available</span></div><div className="transition-entering">ENTERING COMMAND CENTER<span>...</span></div></div></div>;
 }
 
+function analystNameFromEmail(email: string) {
+  const localPart = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+  return localPart.split(" ").filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(" ") || "Analyst";
+}
+
 function App() {
   const initialPath = window.location.pathname;
   const initialPage: EntryPage = initialPath === "/login" ? "login" : initialPath === "/register" ? "register" : initialPath === "/dashboard" ? "dashboard" : "home";
   const [entryPage, setEntryPage] = useState<EntryPage>(initialPage);
   const [screen, setScreen] = useState("command");
   const [compact, setCompact] = useState(false);
+  const [analystName, setAnalystName] = useState("Arjun Shah");
   const [selectedTransaction, setSelectedTransaction] = useState("");
   useEffect(() => {
     const handlePopState = () => {
@@ -817,10 +824,10 @@ function App() {
     return <CommandCenter setScreen={setScreen} selectTransaction={setSelectedTransaction}/>;
   }, [screen, selectedTransaction]);
   if (entryPage === "home") return <HomePage onNavigate={navigateEntry}/>;
-  if (entryPage === "login") return <LoginPage onNavigate={navigateEntry} onSuccess={() => { window.history.pushState({}, "", "/dashboard"); setEntryPage("transition"); }}/>;
+  if (entryPage === "login") return <LoginPage onNavigate={navigateEntry} onSuccess={(email) => { setAnalystName(analystNameFromEmail(email)); window.history.pushState({}, "", "/dashboard"); setEntryPage("transition"); }}/>;
   if (entryPage === "register") return <RegisterPage onNavigate={navigateEntry}/>;
   if (entryPage === "transition") return <SecureTransition onComplete={() => setEntryPage("dashboard")}/>;
-  return <div className="app-shell"><Sidebar screen={screen === "transaction-detail" ? "transactions" : screen} setScreen={setScreen} compact={compact} setCompact={setCompact}/><div className="app-main">{content}</div></div>;
+  return <div className="app-shell"><Sidebar screen={screen === "transaction-detail" ? "transactions" : screen} setScreen={setScreen} compact={compact} setCompact={setCompact} analystName={analystName}/><div className="app-main">{content}</div></div>;
 }
 
 export default App;
