@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type IconName =
   | "grid"
@@ -333,10 +333,158 @@ function ModelInsights() {
   </main></>;
 }
 
+type EntryPage = "home" | "login" | "register" | "transition" | "dashboard";
+
+function NetworkPreview() {
+  return <div className="network-preview" aria-hidden="true">
+    <svg viewBox="0 0 420 260" role="presentation">
+      <g className="network-lines">
+        <path d="M82 65L190 116L300 70L348 172L210 210L190 116L82 65" />
+        <path d="M190 116L348 172" />
+      </g>
+      {[
+        ["82", "65", "ACCOUNT"],
+        ["190", "116", "DEVICE"],
+        ["300", "70", "ACCOUNT"],
+        ["348", "172", "PAYOUT"],
+        ["210", "210", "FRAUD RING"],
+      ].map(([cx, cy, label]) => <g className="network-node" key={label + cx}>
+        <circle cx={cx} cy={cy} r="5" />
+        <text x={Number(cx) + 11} y={Number(cy) + 4}>{label}</text>
+      </g>)}
+    </svg>
+  </div>;
+}
+
+function StatusLine({ label, active = true }: { label: string; active?: boolean }) {
+  return <div className="status-line"><span className={`live-dot ${active ? "" : "inactive"}`} />{label}</div>;
+}
+
+function EntryShell({ children, onNavigate }: { children: React.ReactNode; onNavigate: (page: EntryPage) => void }) {
+  return <div className="entry-shell">
+    <header className="entry-header">
+      <button className="entry-brand" onClick={() => onNavigate("home")} aria-label="Go to FININTEL home">
+        <span className="brand-mark"><Icon name="shield" size={21} /></span>
+        <span><strong>FININTEL</strong><small>REAL-TIME FINANCIAL FRAUD INTELLIGENCE</small></span>
+      </button>
+      <div className="entry-header-actions"><StatusLine label="INTELLIGENCE ENGINE ONLINE" /><button className="button entry-login-button" onClick={() => onNavigate("login")}>ANALYST LOGIN <span>→</span></button></div>
+    </header>
+    {children}
+    <footer className="entry-footer"><span>FININTEL INTELLIGENCE SYSTEM</span><span>SECURE · EXPLAINABLE · CONNECTED</span></footer>
+  </div>;
+}
+
+function HomePage({ onNavigate }: { onNavigate: (page: EntryPage) => void }) {
+  return <EntryShell onNavigate={onNavigate}>
+    <main className="entry-main home-main">
+      <section className="home-copy">
+        <div className="eyebrow cyan">ENTER THE INTELLIGENCE SYSTEM</div>
+        <h1>Financial fraud<br /><span>intelligence.</span></h1>
+        <p className="entry-lede">Detect suspicious transactions. Uncover hidden fraud networks. Understand risk before it becomes loss.</p>
+        <div className="capability-grid">
+          <div><span className="capability-index">01</span><strong>BEHAVIORAL DETECTION</strong><p>Identify abnormal transaction behavior.</p></div>
+          <div><span className="capability-index">02</span><strong>NETWORK INTELLIGENCE</strong><p>Discover coordinated fraud rings and hidden relationships.</p></div>
+          <div><span className="capability-index">03</span><strong>EXPLAINABLE AI</strong><p>Understand why transactions and accounts are considered risky.</p></div>
+        </div>
+        <div className="entry-cta-row"><button className="primary-entry-button" onClick={() => onNavigate("login")}>ENTER FININTEL <span>→</span></button><span>Already have analyst access? <button className="text-button" onClick={() => onNavigate("login")}>SIGN IN</button></span></div>
+      </section>
+      <section className="home-visual">
+        <div className="visual-label">RELATIONSHIP INTELLIGENCE <span>LIVE</span></div>
+        <NetworkPreview />
+        <div className="intelligence-panel">
+          <div className="eyebrow">INTELLIGENCE ENGINE</div>
+          <StatusLine label="RISK ENGINE · ONLINE" />
+          <StatusLine label="NETWORK ANALYSIS · ONLINE" />
+          <StatusLine label="MODEL STATUS · ACTIVE" />
+        </div>
+      </section>
+    </main>
+  </EntryShell>;
+}
+
+function LoginPage({ onNavigate, onSuccess }: { onNavigate: (page: EntryPage) => void; onSuccess: () => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(false);
+  const [error, setError] = useState("");
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError("Enter a valid analyst email.");
+    if (!password) return setError("Password is required.");
+    setError("");
+    onSuccess();
+  };
+  return <EntryShell onNavigate={onNavigate}>
+    <main className="auth-main">
+      <section className="auth-intro"><div className="eyebrow cyan">FININTEL ANALYST PORTAL</div><h1>Secure access.</h1><p>Secure access to real-time fraud detection, network intelligence and explainable risk analysis.</p><div className="auth-capabilities"><span>BEHAVIORAL DETECTION</span><span>NETWORK INTELLIGENCE</span><span>EXPLAINABLE AI</span></div><NetworkPreview /></section>
+      <form className="auth-card" onSubmit={submit} noValidate>
+        <div className="eyebrow cyan">SECURE ACCESS</div><h2>Authenticate as an analyst.</h2><p className="auth-card-subtitle">Use your authorized FININTEL credentials to continue.</p>
+        <label>EMAIL / ANALYST ID<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="analyst@company.com" autoComplete="username" /></label>
+        <label>PASSWORD<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" autoComplete="current-password" /></label>
+        <div className="auth-options"><label className="checkbox-label"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /> Remember this device</label><button type="button" className="text-button">Forgot password?</button></div>
+        {error && <div className="form-error" role="alert">{error}</div>}
+        <button className="primary-entry-button full-width" type="submit">SIGN IN <span>→</span></button>
+        <div className="auth-switch">Don't have an analyst account? <button type="button" className="text-button" onClick={() => onNavigate("register")}>CREATE ACCOUNT</button></div>
+        <StatusLine label="INTELLIGENCE ENGINE ONLINE" />
+      </form>
+    </main>
+  </EntryShell>;
+}
+
+function RegisterPage({ onNavigate }: { onNavigate: (page: EntryPage) => void }) {
+  const [form, setForm] = useState({ name: "", email: "", analystId: "", password: "", confirm: "" });
+  const [error, setError] = useState("");
+  const update = (field: keyof typeof form) => (event: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [field]: event.target.value });
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!form.name || !form.email || !form.analystId || !form.password || !form.confirm) return setError("Complete all required fields.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return setError("Enter a valid analyst email.");
+    if (form.password !== form.confirm) return setError("Passwords do not match.");
+    setError("");
+    onNavigate("login");
+  };
+  return <EntryShell onNavigate={onNavigate}>
+    <main className="auth-main register-main">
+      <section className="auth-intro"><div className="eyebrow cyan">CONTROLLED ACCESS</div><h1>Join the<br /><span>intelligence system.</span></h1><p>Request secure access to the FININTEL intelligence platform.</p><NetworkPreview /></section>
+      <form className="auth-card register-card" onSubmit={submit} noValidate>
+        <div className="eyebrow cyan">CREATE ANALYST ACCOUNT</div><h2>Request secure access.</h2><p className="auth-card-subtitle">Registration is reviewed before analyst access is enabled.</p>
+        <div className="field-grid"><label>FULL NAME<input value={form.name} onChange={update("name")} placeholder="Your full name" autoComplete="name" /></label><label>WORK EMAIL<input type="email" value={form.email} onChange={update("email")} placeholder="analyst@company.com" autoComplete="email" /></label><label>ANALYST ID<input value={form.analystId} onChange={update("analystId")} placeholder="e.g. AS-2048" /></label><label>ACCESS LEVEL<select defaultValue="Fraud Analyst"><option>Fraud Analyst</option><option>Senior Fraud Analyst</option><option>Investigator</option></select></label><label>PASSWORD<input type="password" value={form.password} onChange={update("password")} placeholder="Create a password" autoComplete="new-password" /></label><label>CONFIRM PASSWORD<input type="password" value={form.confirm} onChange={update("confirm")} placeholder="Repeat your password" autoComplete="new-password" /></label></div>
+        {error && <div className="form-error" role="alert">{error}</div>}
+        <button className="primary-entry-button full-width" type="submit">CREATE ACCOUNT <span>→</span></button>
+        <div className="auth-switch">Already have an account? <button type="button" className="text-button" onClick={() => onNavigate("login")}>SIGN IN</button></div>
+      </form>
+    </main>
+  </EntryShell>;
+}
+
+function SecureTransition({ onComplete }: { onComplete: () => void }) {
+  useEffect(() => {
+    const timer = window.setTimeout(onComplete, 1100);
+    return () => window.clearTimeout(timer);
+  }, [onComplete]);
+  return <div className="transition-screen"><div className="transition-card"><div className="brand-mark"><Icon name="shield" size={24} /></div><div className="eyebrow cyan">FININTEL</div><h1>SECURE SESSION ESTABLISHED</h1><div className="transition-checks"><span>✓ Identity verified</span><span>✓ Fraud intelligence engine connected</span><span>✓ Network analysis available</span></div><div className="transition-entering">ENTERING COMMAND CENTER<span>...</span></div></div></div>;
+}
+
 function App() {
+  const initialPath = window.location.pathname;
+  const initialPage: EntryPage = initialPath === "/login" ? "login" : initialPath === "/register" ? "register" : initialPath === "/dashboard" ? "dashboard" : "home";
+  const [entryPage, setEntryPage] = useState<EntryPage>(initialPage);
   const [screen, setScreen] = useState("command");
   const [compact, setCompact] = useState(false);
   const [, setSelectedTransaction] = useState("TXN-10482");
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      setEntryPage(path === "/login" ? "login" : path === "/register" ? "register" : path === "/dashboard" ? "dashboard" : "home");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+  const navigateEntry = (page: EntryPage) => {
+    const path = page === "home" ? "/" : page === "login" ? "/login" : page === "register" ? "/register" : "/dashboard";
+    window.history.pushState({}, "", path);
+    setEntryPage(page);
+  };
   const content = useMemo(() => {
     if (screen === "transactions") return <Transactions setScreen={setScreen} selectTransaction={setSelectedTransaction}/>;
     if (screen === "transaction-detail") return <TransactionDetail setScreen={setScreen}/>;
@@ -346,6 +494,10 @@ function App() {
     if (screen === "model") return <ModelInsights/>;
     return <CommandCenter setScreen={setScreen} selectTransaction={setSelectedTransaction}/>;
   }, [screen]);
+  if (entryPage === "home") return <HomePage onNavigate={navigateEntry}/>;
+  if (entryPage === "login") return <LoginPage onNavigate={navigateEntry} onSuccess={() => { window.history.pushState({}, "", "/dashboard"); setEntryPage("transition"); }}/>;
+  if (entryPage === "register") return <RegisterPage onNavigate={navigateEntry}/>;
+  if (entryPage === "transition") return <SecureTransition onComplete={() => setEntryPage("dashboard")}/>;
   return <div className="app-shell"><Sidebar screen={screen === "transaction-detail" ? "transactions" : screen} setScreen={setScreen} compact={compact} setCompact={setCompact}/><div className="app-main">{content}</div></div>;
 }
 
