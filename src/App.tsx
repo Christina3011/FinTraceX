@@ -47,6 +47,35 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
 
 type Risk = "safe" | "medium" | "high" | "critical";
 
+type TransactionInput = {
+  txn_id: string;
+  account_id: string;
+  timestamp: string;
+  amount: string;
+  merchant: string;
+  item: string;
+  device_id: string;
+  location: string;
+  payout_account: string;
+};
+
+const transactionFields: { key: keyof TransactionInput; label: string; placeholder: string; type?: string }[] = [
+  { key: "txn_id", label: "Transaction ID", placeholder: "TXN-10482" },
+  { key: "account_id", label: "Account ID", placeholder: "ACC-9281" },
+  { key: "timestamp", label: "Timestamp", placeholder: "2026-10-07 02:43" },
+  { key: "amount", label: "Amount", placeholder: "84200", type: "number" },
+  { key: "merchant", label: "Merchant", placeholder: "ElectroMart" },
+  { key: "item", label: "Item", placeholder: "Premium Electronics" },
+  { key: "device_id", label: "Device ID", placeholder: "DVC-77821" },
+  { key: "location", label: "Location", placeholder: "Chennai" },
+  { key: "payout_account", label: "Payout Account", placeholder: "PAY-1032" },
+];
+
+const emptyTransaction: TransactionInput = {
+  txn_id: "", account_id: "", timestamp: "", amount: "", merchant: "", item: "",
+  device_id: "", location: "", payout_account: "",
+};
+
 const transactions = [
   { id: "TXN-10482", account: "ACC-9281", amount: "₹84,200", merchant: "ElectroMart", score: 94, reason: "New device + network", risk: "critical" as Risk, time: "02:43" },
   { id: "TXN-10481", account: "ACC-1823", amount: "₹12,500", merchant: "TechWorld", score: 61, reason: "Unusual location", risk: "medium" as Risk, time: "02:41" },
@@ -206,8 +235,75 @@ function CommandCenter({ setScreen, selectTransaction }: { setScreen: (s: string
   </>;
 }
 
+function TransactionEntry({ onBack }: { onBack: () => void }) {
+  const [form, setForm] = useState(emptyTransaction);
+  const [errors, setErrors] = useState<Partial<Record<keyof TransactionInput, string>>>({});
+  const [status, setStatus] = useState("");
+  const update = (key: keyof TransactionInput) => (event: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: event.target.value });
+  const validate = () => {
+    const next: Partial<Record<keyof TransactionInput, string>> = {};
+    transactionFields.forEach(({ key }) => { if (!form[key].trim()) next[key] = "This field is required."; });
+    if (form.amount && (!Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0)) next.amount = "Please enter a valid transaction amount.";
+    if (form.timestamp && Number.isNaN(Date.parse(form.timestamp))) next.timestamp = "Please enter a valid timestamp.";
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+  const analyze = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!validate()) return;
+    setStatus("Transaction validated. The analysis adapter is ready for the connected fraud-detection API; no prediction was generated locally.");
+  };
+  return <><AppHeader title="Transaction Analysis" subtitle="Submit a transaction to the fraud intelligence engine."/><main className="content">
+    <div className="breadcrumb"><span onClick={onBack}>Transactions</span><Icon name="chevron" size={13}/><strong>Enter transaction</strong></div>
+    <form className="transaction-workflow" onSubmit={analyze} noValidate>
+      <Panel className="workflow-panel"><SectionTitle eyebrow="MANUAL ANALYSIS" title="Transaction details" meta={<Badge tone="info">MODEL ADAPTER</Badge>}/><p className="workflow-help">Enter the source record exactly as it appears in your transaction system. Values are sent to the backend pipeline after validation.</p>
+        <div className="transaction-form-grid">{transactionFields.map(({ key, label, placeholder, type }) => <label key={key} className={key === "timestamp" ? "timestamp-field" : ""}>{label}<input type={type || "text"} value={form[key]} onChange={update(key)} placeholder={placeholder} aria-invalid={Boolean(errors[key])}/>{errors[key] && <span className="field-error">{errors[key]}</span>}</label>)}</div>
+        {status && <div className="workflow-status" role="status"><strong>INPUT ACCEPTED</strong><span>{status}</span></div>}
+        <div className="workflow-actions"><ActionButton tone="ghost" onClick={onBack}>CANCEL</ActionButton><button className="button primary-workflow-button" type="submit">ANALYZE TRANSACTION <span>→</span></button></div>
+      </Panel>
+      <Panel className="pipeline-panel"><div className="eyebrow cyan">ANALYSIS PIPELINE</div><div className="pipeline-steps">{["Feature engineering", "XGBoost / CatBoost model", "Fraud probability + risk score", "SHAP explanation", "Network and ring analysis", "Recommended action"].map((step, index) => <div key={step}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong>{index < 5 && <i>↓</i>}</div>)}</div><div className="demo-notice"><span className="live-dot"/><div><strong>Backend connection required</strong><p>Predictions, explanations and network results will appear here once the analysis API is connected.</p></div></div></Panel>
+    </form>
+  </main></>;
+}
+
+function CsvUpload({ onBack }: { onBack: () => void }) {
+  const [fileName, setFileName] = useState("");
+  const [preview, setPreview] = useState<string[][]>([]);
+  const [error, setError] = useState("");
+  const required = transactionFields.map(({ key }) => key);
+  const parseCsv = (text: string) => text.trim().split(/\r?\n/).map((line) => line.split(",").map((cell) => cell.trim()));
+  const chooseFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name); setError("");
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rows = parseCsv(String(reader.result || ""));
+      const headers = rows[0] || [];
+      const missing = required.filter((column) => !headers.includes(column));
+      if (missing.length) { setPreview([]); setError(`INVALID CSV FORMAT — Missing columns: ${missing.join(", ")}`); return; }
+      setPreview(rows.slice(0, 6));
+    };
+    reader.onerror = () => setError("Unable to read this CSV file.");
+    reader.readAsText(file);
+  };
+  return <><AppHeader title="Batch Transaction Analysis" subtitle="Upload transaction records to analyze multiple transactions simultaneously."/><main className="content">
+    <div className="breadcrumb"><span onClick={onBack}>Transactions</span><Icon name="chevron" size={13}/><strong>Upload transactions</strong></div>
+    <Panel className="upload-panel"><SectionTitle eyebrow="BATCH ANALYSIS" title="Upload transaction records" meta={<Badge tone="info">CSV</Badge>}/><p className="workflow-help">Validate your file before analysis. The first row must contain the expected column names.</p>
+      <div className="upload-dropzone"><Icon name="swap" size={24}/><strong>{fileName || "Choose a CSV file"}</strong><span>CSV files only · up to 10,000 rows</span><label className="button">CHOOSE CSV FILE<input type="file" accept=".csv,text/csv" onChange={chooseFile}/></label></div>
+      <div className="upload-tools"><button type="button" className="text-button" onClick={() => { const blob = new Blob([`${required.join(",")}\n`], { type: "text/csv" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "transaction-template.csv"; link.click(); URL.revokeObjectURL(url); }}>DOWNLOAD CSV TEMPLATE</button><span>Expected columns: <span className="mono">{required.join(", ")}</span></span></div>
+      {error && <div className="csv-error" role="alert">{error}</div>}
+      {preview.length > 0 && <><div className="preview-meta"><strong>VALIDATED PREVIEW</strong><span>{Math.max(preview.length - 1, 0)} preview rows · ready for backend analysis</span></div><div className="table-wrap preview-table"><table><thead><tr>{preview[0].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{preview.slice(1).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={`${index}-${cellIndex}`}>{cell}</td>)}</tr>)}</tbody></table></div><div className="workflow-actions"><ActionButton tone="ghost" onClick={onBack}>CANCEL</ActionButton><button type="button" className="button primary-workflow-button" onClick={() => setError("CSV validated. Connect the analysis API to generate model-backed batch results.")}>ANALYZE TRANSACTIONS <span>→</span></button></div></>}
+    </Panel>
+  </main></>;
+}
+
 function Transactions({ setScreen, selectTransaction }: { setScreen: (s: string) => void; selectTransaction: (id: string) => void }) {
-  return <><AppHeader title="Transaction Intelligence" subtitle="Analyze transaction behavior and AI-generated risk factors."/><main className="content">
+  const [mode, setMode] = useState<"overview" | "manual" | "csv">("overview");
+  if (mode === "manual") return <TransactionEntry onBack={() => setMode("overview")}/>;
+  if (mode === "csv") return <CsvUpload onBack={() => setMode("overview")}/>;
+  return <><AppHeader title="Transaction Intelligence" subtitle="Analyze transactions for behavioral risk, suspicious activity, and fraud-network connections."/><main className="content">
+    <div className="analysis-options"><Panel className="analysis-option"><div className="analysis-option-icon"><Icon name="swap" size={25}/></div><div><div className="eyebrow cyan">OPTION A</div><div className="section-title">Enter transaction</div><p>Analyze a single transaction using the fraud intelligence engine.</p></div><button className="button" onClick={() => setMode("manual")}>ENTER TRANSACTION <span>→</span></button></Panel><Panel className="analysis-option"><div className="analysis-option-icon"><Icon name="case" size={25}/></div><div><div className="eyebrow cyan">OPTION B</div><div className="section-title">Upload transactions</div><p>Upload a CSV file to analyze multiple transactions.</p></div><button className="button" onClick={() => setMode("csv")}>UPLOAD TRANSACTIONS <span>→</span></button></Panel></div>
     <Panel className="filter-panel"><div className="filter-grid"><Filter label="Search transaction, account, device…" wide/><Filter label="All risk levels"/><Filter label="Last 24 hours"/><Filter label="All merchants"/><Filter label="All locations"/><Filter label="All statuses"/><ActionButton tone="ghost" icon="filter">Clear filters</ActionButton></div></Panel>
     <Panel className="transactions-panel"><SectionTitle eyebrow="48,291 TOTAL · 327 HIGH RISK" title="Transaction Activity" meta={<div className="segmented"><span className="active">All</span><span>Flagged</span><span>Reviewed</span></div>}/><TransactionTable onSelect={(id) => {selectTransaction(id); setScreen("transaction-detail");}}/><div className="table-footer"><span>Showing 1–6 of 48,291</span><span className="pagination"><b>‹</b><b className="active">1</b><b>2</b><b>3</b><b>›</b></span></div></Panel>
   </main></>;
