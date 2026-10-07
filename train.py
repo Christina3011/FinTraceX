@@ -2,11 +2,22 @@
 Run: python train.py
 Writes: outputs/scores.csv, outputs/account_scores.csv, outputs/model.json
 """
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import average_precision_score, precision_recall_curve
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    confusion_matrix,
+    f1_score,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+)
 from sklearn.preprocessing import StandardScaler
 from features import build_features, FEATURES, CAT_COLS, NUM_COLS
 
@@ -54,10 +65,15 @@ def pick_threshold(y, s):
 
 def evaluate(name, y, s, thr):
     pred = s >= thr
-    tp, fp = int((pred & (y == 1)).sum()), int((pred & (y == 0)).sum())
-    fn, tn = int((~pred & (y == 1)).sum()), int((~pred & (y == 0)).sum())
-    print(f"{name:12s} thr={thr:.3f} precision={tp/max(tp+fp,1):.3f} recall={tp/max(tp+fn,1):.3f} "
-          f"FPR={fp/max(fp+tn,1):.4f} PR-AUC={average_precision_score(y, s):.3f} (FP={fp}, FN={fn})")
+    matrix = confusion_matrix(y, pred, labels=[0, 1])
+    print(
+        f"{name:12s} threshold={thr:.6f} precision={precision_score(y, pred, zero_division=0):.3f} "
+        f"recall={recall_score(y, pred, zero_division=0):.3f} "
+        f"F1={f1_score(y, pred, zero_division=0):.3f} "
+        f"accuracy={accuracy_score(y, pred):.3f} "
+        f"PR-AUC={average_precision_score(y, s):.3f}\n"
+        f"  confusion matrix [[TN, FP], [FN, TP]]: {matrix.tolist()}"
+    )
 
 thr = pick_threshold(va.is_fraud, cat_score(va))
 thr_lr = pick_threshold(va.is_fraud, lr_score(va))
@@ -66,19 +82,61 @@ evaluate("XGBoost", te.is_fraud, cat_score(te), thr)
 evaluate("LogReg base", te.is_fraud, lr_score(te), thr_lr)
 
 # ---- 5. SHAP explanations -> plain English ----
-def reason_text(f, row):
+def reason_text(f, row, lower_risk=False):
+    def account_count(key):
+        count = int(row[key])
+        return f"{count} account{'s' if count != 1 else ''}"
+
     return {
-        "amount_ratio": f"amount is {row['amount_ratio']:.1f}x this account's normal",
+        "amount_ratio": f"amount is {row['amount_ratio']:.1f}x this account's previous average",
+        "amount_vs_account_mean": (
+            f"amount is {row['amount_vs_account_mean']:.1f}x this account's previous average"
+        ),
+        "amount_vs_account_max": (
+            f"amount is {row['amount_vs_account_max']:.1f}x this account's previous maximum"
+        ),
         "amount": f"large amount ({row['amount']:.0f})",
-        "hour": f"unusual hour ({int(row['hour']):02d}:00)",
+        "hour": f"transaction at {int(row['hour']):02d}:00",
         "new_device": "new device for this account",
+        "known_device": "device previously used by this account",
         "new_location": "new location for this account",
+        "known_location": "location previously used by this account",
+        "normal_hour_for_account": (
+            f"transaction hour matches {row['normal_hour_for_account']:.0%} "
+            "of this account's previous activity within two hours"
+        ),
+        "account_transaction_count": (
+            f"{int(row['account_transaction_count'])} previous transactions for this account"
+        ),
+        "days_since_last_transaction": (
+            f"{row['days_since_last_transaction']:.1f} days since this account's last transaction"
+        ),
         "txn_last_hour": f"{int(row['txn_last_hour'])} other transactions in the last hour",
-        "accounts_per_device": f"device shared by {int(row['accounts_per_device'])} accounts",
-        "accounts_per_payout": f"payout account shared by {int(row['accounts_per_payout'])} accounts",
-        "merchant": f"unusual merchant ({row['merchant']})",
-        "item": f"unusual item ({row['item']})",
-        "location": f"unusual location ({row['location']})",
+        "accounts_per_device": (
+            f"device previously seen on {account_count('accounts_per_device')}"
+            if lower_risk
+            else f"device shared by {account_count('accounts_per_device')}"
+        ),
+        "accounts_per_payout": (
+            f"payout account previously seen on {account_count('accounts_per_payout')}"
+            if lower_risk
+            else f"payout account shared by {account_count('accounts_per_payout')}"
+        ),
+        "merchant": (
+            f"merchant category ({row['merchant']})"
+            if lower_risk
+            else f"unusual merchant ({row['merchant']})"
+        ),
+        "item": (
+            f"item category ({row['item']})"
+            if lower_risk
+            else f"unusual item ({row['item']})"
+        ),
+        "location": (
+            f"location ({row['location']})"
+            if lower_risk
+            else f"unusual location ({row['location']})"
+        ),
     }[f]
 
 df["risk_score"] = cat_score(df)
@@ -88,13 +146,36 @@ shap = model.get_booster().predict(dm, pred_contribs=True)[:, :-1]  # drop bias 
 
 reasons = []
 for i in range(len(df)):
-    if not df["flagged"].iat[i]:
-        reasons.append("")
-        continue
     row = df.iloc[i]
-    top = [j for j in np.argsort(-shap[i])[:3] if shap[i][j] > 0]
-    reasons.append("; ".join(reason_text(FEATURES[j], row) for j in top))
+    if df["flagged"].iat[i]:
+        top = [j for j in np.argsort(-shap[i])[:3] if shap[i][j] > 0]
+        reasons.append("; ".join(reason_text(FEATURES[j], row) for j in top))
+    else:
+        top = [j for j in np.argsort(shap[i])[:3] if shap[i][j] < 0]
+        evidence = "; ".join(reason_text(FEATURES[j], row, lower_risk=True) for j in top)
+        reasons.append(f"Lower-risk evidence: {evidence}" if evidence else "")
 df["reasons"] = reasons
+
+# Decoy IDs are used only for a separate evaluation report, never for features or fitting.
+ground_truth = json.loads(Path("data/ground_truth.json").read_text(encoding="utf-8"))
+decoys = df[df["txn_id"].isin(ground_truth["decoy_txn_ids"])]
+decoy_flags = decoys["risk_score"] >= thr
+print(
+    f"\nLegitimate high-value decoys (all {len(decoys)}): "
+    f"correctly unflagged={int((~decoy_flags).sum())}, "
+    f"incorrectly flagged={int(decoy_flags.sum())}, "
+    f"false-positive rate={decoy_flags.mean():.3f}"
+)
+test_decoys = df[
+    (split == "test") & df["txn_id"].isin(ground_truth["decoy_txn_ids"])
+]
+if len(test_decoys):
+    test_decoy_flags = test_decoys["risk_score"] >= thr
+    print(
+        f"  Test-split decoys ({len(test_decoys)}): "
+        f"incorrectly flagged={int(test_decoy_flags.sum())}, "
+        f"false-positive rate={test_decoy_flags.mean():.3f}"
+    )
 
 # ---- 6. account score = mean of the account's top-3 transaction scores ----
 acc = (df.groupby("account_id")["risk_score"]

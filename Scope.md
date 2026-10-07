@@ -10,7 +10,8 @@ This note separates the minimum viable solution we implemented from stretch goal
 | Behaviour and ring-signal features | `features.py` |
 | XGBoost risk score for every transaction, with a threshold chosen on validation data to target at least 90% precision | `train.py` |
 | Logistic Regression baseline for comparison | `train.py` |
-| Plain-English SHAP explanation for flagged transactions | `train.py` |
+| Leakage-safe historical amount, device, location, hour, count and recency features | `features.py` |
+| Plain-English SHAP explanations: risk-increasing evidence for flagged transactions and risk-reducing evidence for unflagged transactions | `train.py` |
 | Graph of accounts, devices and payout accounts, and ring detection with a false-ring filter | `rings.py` |
 | Account risk score, reason and recommended action | `rings.py` |
 | Pattern sentence and evidence for each ring | `rings.py`, `outputs/rings.json` |
@@ -26,7 +27,7 @@ This note separates the minimum viable solution we implemented from stretch goal
 | Test on a second dataset (PaySim) | Not implemented |
 | Isolation Forest for new, unseen fraud patterns | Not done |
 | Account behaviour drift (accounts that change behaviour over time) | Not done |
-| Reducing false positives on legitimate high-value purchases | Partially addressed by validation-based threshold selection; some decoys may still be flagged |
+| Reducing false positives on legitimate high-value purchases | Improved from 2/30 to 1/30 after adding behavioral features and removing raw amount as a direct model input; not fully eliminated |
 | Comparison with other models (CatBoost, LightGBM) | Not done, XGBoost chosen as the single main model |
 
 ## Known limitations
@@ -35,6 +36,8 @@ This note separates the minimum viable solution we implemented from stretch goal
 - Ring detection relies on shared devices and shared payout accounts. A ring that avoids sharing them would be missed.
 - A few legitimate high-value purchases can still be flagged.
 - This is a batch prototype, not a real-time production service; actions such as freezing accounts are recommendations, not executed operations.
+- The latest test run retained 1.000 recall but had 0.984 precision (one test false positive); full-dataset evaluation still has 3 false positives, including 1 of the 30 high-value decoys.
+- The held-out account-level test split contained 7 decoys; none were flagged. The reported full-data decoy count also includes training/validation accounts and is not a fully held-out estimate.
 
 ## Resources used
 
