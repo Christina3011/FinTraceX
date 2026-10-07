@@ -46,6 +46,16 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
 }
 
 type Risk = "safe" | "medium" | "high" | "critical";
+type TransactionRow = {
+  id: string;
+  account: string;
+  amount: string;
+  merchant: string;
+  score: number | null;
+  reason: string;
+  risk: Risk | "pending";
+  time: string;
+};
 
 type TransactionInput = {
   txn_id: string;
@@ -76,7 +86,7 @@ const emptyTransaction: TransactionInput = {
   device_id: "", location: "", payout_account: "",
 };
 
-const transactions = [
+const transactions: TransactionRow[] = [
   { id: "TXN-10482", account: "ACC-9281", amount: "₹84,200", merchant: "ElectroMart", score: 94, reason: "New device + network", risk: "critical" as Risk, time: "02:43" },
   { id: "TXN-10481", account: "ACC-1823", amount: "₹12,500", merchant: "TechWorld", score: 61, reason: "Unusual location", risk: "medium" as Risk, time: "02:41" },
   { id: "TXN-10480", account: "ACC-5512", amount: "₹2,400", merchant: "FreshMart", score: 8, reason: "Normal behavior", risk: "safe" as Risk, time: "02:38" },
@@ -114,7 +124,7 @@ function Filter({ label, wide = false }: { label: string; wide?: boolean }) {
   return <div className={`filter-control ${wide ? "wide" : ""}`} role="button" tabIndex={0}>{wide && <Icon name="search" size={16}/>}<span>{label}</span>{!wide && <span className="filter-caret">⌄</span>}</div>;
 }
 
-function Sidebar({ screen, setScreen, compact, setCompact }: { screen: string; setScreen: (s: string) => void; compact: boolean; setCompact: (v: boolean) => void }) {
+function Sidebar({ screen, setScreen, compact, setCompact, analystName }: { screen: string; setScreen: (s: string) => void; compact: boolean; setCompact: (v: boolean) => void; analystName: string }) {
   return <aside className={`sidebar ${compact ? "compact" : ""}`}>
     <div className="brand">
       <div className="brand-mark"><Icon name="shield" size={22}/></div>
@@ -128,8 +138,8 @@ function Sidebar({ screen, setScreen, compact, setCompact }: { screen: string; s
     <div className="side-spacer"/>
     <div className="system-card"><div className="system-line"><span className="live-dot"/><span>SYSTEM ONLINE</span></div><div className="system-meta">Models · API · Graph</div></div>
     <div className="analyst">
-      <div className="avatar">AS</div>
-      <div className="analyst-copy"><strong>Arjun Shah</strong><span>Senior Fraud Analyst</span></div>
+      <div className="avatar">{analystName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div>
+      <div className="analyst-copy"><strong>{analystName}</strong><span>Senior Fraud Analyst</span></div>
       <Icon name="chevron" size={14}/>
     </div>
   </aside>;
@@ -153,15 +163,16 @@ function RiskBar({ label, value, tone }: { label: string; value: number; tone: R
   return <div className="risk-row"><div className="risk-row-meta"><span><span className={`legend-dot ${tone}`}/>{label}</span><strong>{value}%</strong></div><div className="bar-track"><span className={tone} style={{width: `${value}%`}}/></div></div>;
 }
 
-function TransactionTable({ onSelect, limit }: { onSelect: (id: string) => void; limit?: number }) {
-  const rows = limit ? transactions.slice(0, limit) : transactions;
+function TransactionTable({ onSelect, limit, rows: suppliedRows }: { onSelect: (id: string) => void; limit?: number; rows?: TransactionRow[] }) {
+  const sourceRows = suppliedRows || transactions;
+  const rows = limit ? sourceRows.slice(0, limit) : sourceRows;
   return <div className="table-wrap"><table>
     <thead><tr><th>Transaction</th><th>Account</th><th>Amount</th><th>Merchant</th><th>Risk score</th><th>Reason</th><th>Action</th></tr></thead>
     <tbody>{rows.map((tx) => <tr key={tx.id} onClick={() => onSelect(tx.id)}>
       <td><span className="mono primary-id">{tx.id}</span><span className="row-time">{tx.time} AM</span></td>
       <td><span className="mono">{tx.account}</span></td><td className="amount">{tx.amount}</td><td>{tx.merchant}</td>
-      <td><div className="score-cell"><strong>{String(tx.score).padStart(2, "0")}</strong><span>/100</span><span className={`score-line ${tx.risk}`} style={{width: `${Math.max(tx.score, 12)}%`}}/></div></td>
-      <td>{tx.reason}</td><td><Badge tone={tx.risk}>{tx.risk === "critical" ? "Freeze" : tx.risk === "high" || tx.risk === "medium" ? "Review" : "Safe"}</Badge></td>
+      <td><div className={`score-cell ${tx.risk === "pending" ? "pending-score" : ""}`}><strong>{tx.score === null ? "—" : String(tx.score).padStart(2, "0")}</strong><span>{tx.score === null ? "pending" : "/100"}</span>{tx.score !== null && <span className={`score-line ${tx.risk}`} style={{width: `${Math.max(tx.score, 12)}%`}}/>}</div></td>
+      <td>{tx.reason}</td><td>{tx.risk === "pending" ? <span className="pending-label">PENDING</span> : <Badge tone={tx.risk}>{tx.risk === "critical" ? "Freeze" : tx.risk === "high" || tx.risk === "medium" ? "Review" : "Safe"}</Badge>}</td>
     </tr>)}</tbody>
   </table></div>;
 }
@@ -266,9 +277,10 @@ function TransactionEntry({ onBack }: { onBack: () => void }) {
   </main></>;
 }
 
-function CsvUpload({ onBack }: { onBack: () => void }) {
+function CsvUpload({ onBack, onTransactionsAdded }: { onBack: () => void; onTransactionsAdded: (rows: TransactionRow[]) => void }) {
   const [fileName, setFileName] = useState("");
   const [preview, setPreview] = useState<string[][]>([]);
+  const [parsedRows, setParsedRows] = useState<string[][]>([]);
   const [error, setError] = useState("");
   const required = transactionFields.map(({ key }) => key);
   const parseCsv = (text: string) => text.trim().split(/\r?\n/).map((line) => line.split(",").map((cell) => cell.trim()));
@@ -281,8 +293,8 @@ function CsvUpload({ onBack }: { onBack: () => void }) {
       const rows = parseCsv(String(reader.result || ""));
       const headers = rows[0] || [];
       const missing = required.filter((column) => !headers.includes(column));
-      if (missing.length) { setPreview([]); setError(`INVALID CSV FORMAT — Missing columns: ${missing.join(", ")}`); return; }
-      setPreview(rows.slice(0, 6));
+      if (missing.length) { setPreview([]); setParsedRows([]); setError(`INVALID CSV FORMAT — Missing columns: ${missing.join(", ")}`); return; }
+      setParsedRows(rows); setPreview(rows.slice(0, 6));
     };
     reader.onerror = () => setError("Unable to read this CSV file.");
     reader.readAsText(file);
@@ -293,19 +305,19 @@ function CsvUpload({ onBack }: { onBack: () => void }) {
       <div className="upload-dropzone"><Icon name="swap" size={24}/><strong>{fileName || "Choose a CSV file"}</strong><span>CSV files only · up to 10,000 rows</span><label className="button">CHOOSE CSV FILE<input type="file" accept=".csv,text/csv" onChange={chooseFile}/></label></div>
       <div className="upload-tools"><button type="button" className="text-button" onClick={() => { const blob = new Blob([`${required.join(",")}\n`], { type: "text/csv" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "transaction-template.csv"; link.click(); URL.revokeObjectURL(url); }}>DOWNLOAD CSV TEMPLATE</button><span>Expected columns: <span className="mono">{required.join(", ")}</span></span></div>
       {error && <div className="csv-error" role="alert">{error}</div>}
-      {preview.length > 0 && <><div className="preview-meta"><strong>VALIDATED PREVIEW</strong><span>{Math.max(preview.length - 1, 0)} preview rows · ready for backend analysis</span></div><div className="table-wrap preview-table"><table><thead><tr>{preview[0].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{preview.slice(1).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={`${index}-${cellIndex}`}>{cell}</td>)}</tr>)}</tbody></table></div><div className="workflow-actions"><ActionButton tone="ghost" onClick={onBack}>CANCEL</ActionButton><button type="button" className="button primary-workflow-button" onClick={() => setError("CSV validated. Connect the analysis API to generate model-backed batch results.")}>ANALYZE TRANSACTIONS <span>→</span></button></div></>}
+      {preview.length > 0 && <><div className="preview-meta"><strong>VALIDATED PREVIEW</strong><span>{Math.max(parsedRows.length - 1, 0)} rows validated · showing first {Math.min(Math.max(preview.length - 1, 0), 5)}</span></div><div className="table-wrap preview-table"><table><thead><tr>{preview[0].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{preview.slice(1).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={`${index}-${cellIndex}`}>{cell}</td>)}</tr>)}</tbody></table></div><div className="workflow-actions"><ActionButton tone="ghost" onClick={onBack}>CANCEL</ActionButton><button type="button" className="button primary-workflow-button" onClick={() => { const columnIndex = Object.fromEntries(parsedRows[0].map((heading, index) => [heading, index])); const addedRows = parsedRows.slice(1).filter((row) => row[columnIndex.txn_id]).map((row) => ({ id: row[columnIndex.txn_id] || "—", account: row[columnIndex.account_id] || "—", amount: row[columnIndex.amount] ? `₹${Number(row[columnIndex.amount]).toLocaleString("en-IN")}` : "—", merchant: row[columnIndex.merchant] || "—", score: null, reason: "Awaiting model analysis", risk: "pending" as const, time: row[columnIndex.timestamp]?.split(" ")[1]?.slice(0, 5) || "—" })); onTransactionsAdded(addedRows); onBack(); }}>ADD TO TRANSACTION ACTIVITY <span>→</span></button></div></>}
     </Panel>
   </main></>;
 }
 
-function Transactions({ setScreen, selectTransaction }: { setScreen: (s: string) => void; selectTransaction: (id: string) => void }) {
+function Transactions({ setScreen, selectTransaction, transactionRows, onTransactionsAdded }: { setScreen: (s: string) => void; selectTransaction: (id: string) => void; transactionRows: TransactionRow[]; onTransactionsAdded: (rows: TransactionRow[]) => void }) {
   const [mode, setMode] = useState<"overview" | "manual" | "csv">("overview");
   if (mode === "manual") return <TransactionEntry onBack={() => setMode("overview")}/>;
-  if (mode === "csv") return <CsvUpload onBack={() => setMode("overview")}/>;
+  if (mode === "csv") return <CsvUpload onBack={() => setMode("overview")} onTransactionsAdded={onTransactionsAdded}/>;
   return <><AppHeader title="Transaction Intelligence" subtitle="Analyze transactions for behavioral risk, suspicious activity, and fraud-network connections."/><main className="content">
     <div className="analysis-options"><Panel className="analysis-option"><div className="analysis-option-icon"><Icon name="swap" size={25}/></div><div><div className="eyebrow cyan">OPTION A</div><div className="section-title">Enter transaction</div><p>Analyze a single transaction using the fraud intelligence engine.</p></div><button className="button" onClick={() => setMode("manual")}>ENTER TRANSACTION <span>→</span></button></Panel><Panel className="analysis-option"><div className="analysis-option-icon"><Icon name="case" size={25}/></div><div><div className="eyebrow cyan">OPTION B</div><div className="section-title">Upload transactions</div><p>Upload a CSV file to analyze multiple transactions.</p></div><button className="button" onClick={() => setMode("csv")}>UPLOAD TRANSACTIONS <span>→</span></button></Panel></div>
     <Panel className="filter-panel"><div className="filter-grid"><Filter label="Search transaction, account, device…" wide/><Filter label="All risk levels"/><Filter label="Last 24 hours"/><Filter label="All merchants"/><Filter label="All locations"/><Filter label="All statuses"/><ActionButton tone="ghost" icon="filter">Clear filters</ActionButton></div></Panel>
-    <Panel className="transactions-panel"><SectionTitle eyebrow="48,291 TOTAL · 327 HIGH RISK" title="Transaction Activity" meta={<div className="segmented"><span className="active">All</span><span>Flagged</span><span>Reviewed</span></div>}/><TransactionTable onSelect={(id) => {selectTransaction(id); setScreen("transaction-detail");}}/><div className="table-footer"><span>Showing 1–6 of 48,291</span><span className="pagination"><b>‹</b><b className="active">1</b><b>2</b><b>3</b><b>›</b></span></div></Panel>
+    <Panel className="transactions-panel"><SectionTitle eyebrow={`${transactionRows.length.toLocaleString()} TOTAL · 327 HIGH RISK`} title="Transaction Activity" meta={<div className="segmented"><span className="active">All</span><span>Flagged</span><span>Reviewed</span></div>}/><TransactionTable rows={transactionRows} onSelect={(id) => {selectTransaction(id); setScreen("transaction-detail");}}/><div className="table-footer"><span>Showing 1–{transactionRows.length} of {transactionRows.length.toLocaleString()}</span><span className="pagination"><b>‹</b><b className="active">1</b><b>2</b><b>3</b><b>›</b></span></div></Panel>
   </main></>;
 }
 
@@ -317,7 +329,25 @@ const evidence = [
   { score: 5, label: "NETWORK CONNECTION", detail: "Connected to Fraud Ring R-03", width: 16 },
 ];
 
-function TransactionDetail({ setScreen }: { setScreen: (s: string) => void }) {
+function UploadedTransactionDetail({ transaction, setScreen }: { transaction: TransactionRow; setScreen: (s: string) => void }) {
+  const isPending = transaction.risk === "pending";
+  return <><AppHeader title="Transaction Investigation" subtitle="Review model evidence, behavioral context and connected risk."/><main className="content">
+    <div className="breadcrumb"><span onClick={() => setScreen("transactions")}>Transactions</span><Icon name="chevron" size={13}/><strong className="mono">{transaction.id}</strong></div>
+    <Panel className="transaction-hero">
+      <div className="tx-heading"><div><div className="eyebrow">TRANSACTION</div><div className="detail-title mono">{transaction.id}</div><div className="detail-meta">{transaction.time} · Uploaded transaction record</div></div><div className="risk-hero"><div className={`score-ring ${isPending ? "pending-ring" : transaction.risk}`}><strong>{transaction.score === null ? "—" : transaction.score}</strong><span>{transaction.score === null ? "PENDING" : "/100"}</span></div><div><Badge tone={isPending ? "medium" : transaction.risk}>{isPending ? "ANALYSIS PENDING" : `${transaction.risk.toUpperCase()} RISK`}</Badge><div className="recommend-inline pending-recommend">{isPending ? "AWAITING MODEL ANALYSIS" : "MONITOR"}</div></div></div></div>
+      <div className="fact-grid">
+        {[["Amount", transaction.amount, "card"], ["Merchant", transaction.merchant, "card"], ["Account", transaction.account, "users"], ["Timestamp", transaction.time, "clock"]].map(([label, value, icon]) => <div className="fact" key={label}><div className="fact-icon"><Icon name={icon as IconName} size={17}/></div><div><span>{label}</span><strong className={label === "Account" ? "mono" : ""}>{value}</strong></div></div>)}
+      </div>
+    </Panel>
+    <div className="detail-layout"><div className="detail-main">
+      <Panel><SectionTitle eyebrow={isPending ? "MODEL STATUS" : "MODEL EXPLANATION"} title={isPending ? "Analysis is pending" : "Transaction risk evidence"}/><div className="uploaded-detail-state"><div className={`uploaded-state-icon ${isPending ? "pending" : "safe"}`}><Icon name={isPending ? "clock" : "shield"} size={24}/></div><strong>{isPending ? "Awaiting model analysis" : "No suspicious activity detected"}</strong><p>{isPending ? "This record was added from a CSV upload. Connect the fraud model pipeline to generate a risk score, SHAP explanation, network analysis and recommended action for this transaction." : "The model did not identify suspicious activity for this transaction."}</p></div></Panel>
+      <Panel><SectionTitle eyebrow="SOURCE RECORD" title="Uploaded transaction context"/><div className="uploaded-context"><div><span>Transaction ID</span><strong className="mono">{transaction.id}</strong></div><div><span>Account ID</span><strong className="mono">{transaction.account}</strong></div><div><span>Merchant</span><strong>{transaction.merchant}</strong></div><div><span>Amount</span><strong>{transaction.amount}</strong></div></div></Panel>
+    </div><div className="detail-side"><Panel className="action-card"><div className="action-icon"><Icon name={isPending ? "clock" : "shield"} size={25}/></div><div className="eyebrow">RECOMMENDED ACTION</div><div className={`action-risk ${isPending ? "pending-action" : ""}`}>{isPending ? "PENDING" : "MONITOR"}</div><div className="action-title">{isPending ? "Await Model<br/>Analysis" : "Monitor"}</div><p>{isPending ? "No action is recommended until the backend model evaluates this transaction." : "No immediate intervention is required."}</p><ActionButton tone="ghost" onClick={() => setScreen("transactions")}>BACK TO TRANSACTIONS</ActionButton></Panel></div></div>
+  </main></>;
+}
+
+function TransactionDetail({ setScreen, transaction }: { setScreen: (s: string) => void; transaction?: TransactionRow }) {
+  if (transaction && transaction.id !== "TXN-10482") return <UploadedTransactionDetail transaction={transaction} setScreen={setScreen}/>;
   return <><AppHeader title="Transaction Investigation" subtitle="Review model evidence, behavioral context and connected risk."/><main className="content">
     <div className="breadcrumb"><span onClick={() => setScreen("transactions")}>Transactions</span><Icon name="chevron" size={13}/><strong className="mono">TXN-10482</strong></div>
     <Panel className="transaction-hero">
@@ -392,6 +422,32 @@ function NetworkScreen({ setScreen }: { setScreen: (s: string) => void }) {
 }
 
 function Investigations() {
+  const [caseAction, setCaseAction] = useState<"open" | "frozen" | "escalated" | "false-positive">("open");
+  const [noteText, setNoteText] = useState("");
+  const [notes, setNotes] = useState([{ author: "Arjun Shah", initials: "AS", time: "02:51", text: "Pattern aligns with device-farm activity. Awaiting payout verification." }]);
+  const [evidenceTab, setEvidenceTab] = useState<"transactions" | "accounts" | "devices" | "ai">("transactions");
+  const [aiExplanation, setAiExplanation] = useState("");
+  const [aiStatus, setAiStatus] = useState<"idle" | "loading" | "error">("idle");
+  const requestAiExplanation = async () => {
+    setAiStatus("loading");
+    try {
+      const response = await fetch("/api/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transaction: { txn_id: "TXN-10482", account_id: "ACC-9281", amount: 84200, merchant: "ElectroMart", device_id: "DVC-77821", location: "Chennai", payout_account: "PAY-1032" },
+          evidence: evidence.map((item) => ({ factor: item.label, detail: item.detail, contribution: item.score })),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The explanation request failed.");
+      setAiExplanation(result.explanation);
+      setAiStatus("idle");
+    } catch (error) {
+      setAiExplanation(error instanceof Error ? error.message : "The explanation request failed.");
+      setAiStatus("error");
+    }
+  };
   const timeline = [
     ["02:31 AM","New device detected","DVC-77821 first observed on account ACC-9281"],
     ["02:37 AM","Unusual transaction initiated","Amount exceeds behavioral baseline by 4.8×"],
@@ -399,13 +455,24 @@ function Investigations() {
     ["02:44 AM","Network relationship identified","Device linked to seven additional accounts"],
     ["02:45 AM","Fraud ring correlation detected","96% match to active network RING-001"],
   ];
+  const actionCopy = {
+    open: { eyebrow: "FINAL RECOMMENDATION", risk: "CRITICAL", title: <>Freeze &amp;<br/>Investigate</>, description: "High transaction risk combined with coordinated network activity.", status: "Case is open and awaiting analyst decision." },
+    frozen: { eyebrow: "ACCOUNT ACTIONED", risk: "FROZEN", title: <>Accounts<br/>Frozen</>, description: "The ten linked accounts are marked for freeze and investigation.", status: "Freeze action recorded for 10 accounts." },
+    escalated: { eyebrow: "CASE ESCALATED", risk: "ESCALATED", title: <>Priority<br/>Escalation</>, description: "The case has been escalated to the senior fraud response queue.", status: "Escalation recorded and assigned to the senior response queue." },
+    "false-positive": { eyebrow: "CASE RESOLVED", risk: "FALSE POSITIVE", title: <>False Positive<br/>Recorded</>, description: "This case was marked as a false positive and removed from the active queue.", status: "False-positive decision recorded." },
+  }[caseAction];
   return <><AppHeader title="Investigation Workspace" subtitle="Consolidated evidence, chronology and analyst decisioning."/><main className="content">
-    <Panel className="case-header"><div><div className="eyebrow">ACTIVE CASE</div><div className="case-title"><span className="mono">INV-00291</span><Badge tone="critical">CRITICAL</Badge><Badge tone="info">OPEN</Badge></div><p>Coordinated account takeover and payout convergence</p></div><div className="case-meta"><div><span>ASSIGNED TO</span><strong>Arjun Shah</strong></div><div><span>OPENED</span><strong>18 Jun · 02:45 AM</strong></div><ActionButton tone="ghost">ADD NOTE</ActionButton></div></Panel>
+    <Panel className="case-header"><div><div className="eyebrow">INVESTIGATION CASE</div><div className="case-title"><span className="mono">INV-00291</span><Badge tone={caseAction === "false-positive" ? "safe" : caseAction === "open" ? "critical" : "medium"}>{caseAction === "open" ? "CRITICAL" : caseAction === "false-positive" ? "RESOLVED" : caseAction.toUpperCase()}</Badge><Badge tone="info">{caseAction === "open" ? "OPEN" : "UPDATED"}</Badge></div><p>Coordinated account takeover and payout convergence</p></div><div className="case-meta"><div><span>ASSIGNED TO</span><strong>Arjun Shah</strong></div><div><span>OPENED</span><strong>18 Jun · 02:45 AM</strong></div><ActionButton tone="ghost" onClick={() => setCaseAction("open")}>RESET CASE</ActionButton></div></Panel>
     <div className="case-layout"><div className="case-main">
       <Panel><SectionTitle eyebrow="5 CORRELATED EVENTS" title="Risk Timeline"/><div className="timeline">{timeline.map((event,i) => <div className={`timeline-item ${i === timeline.length-1 ? "active" : ""}`} key={event[0]}><div className="timeline-time">{event[0]}</div><div className="timeline-track"><span/><i/></div><div><strong>{event[1]}</strong><p>{event[2]}</p></div></div>)}</div></Panel>
-      <Panel><SectionTitle eyebrow="EVIDENCE SUMMARY" title="Investigation Evidence"/><div className="evidence-tabs"><span className="active">Transactions <b>4</b></span><span>Accounts <b>10</b></span><span>Devices <b>3</b></span><span>AI Explanation</span></div><div className="case-evidence"><div className="evidence-callout"><Icon name="shield"/><div><strong>Critical transaction</strong><span className="mono">TXN-10482 · ACC-9281 · ₹84,200</span></div><Badge tone="critical">94/100</Badge></div><p>Transaction was initiated from a newly observed device at an anomalous time and shares payout infrastructure with nine other accounts.</p></div></Panel>
-    </div><div className="case-side"><Panel className="action-card critical-action"><div className="action-icon"><Icon name="shield" size={25}/></div><div className="eyebrow">FINAL RECOMMENDATION</div><div className="action-risk">CRITICAL</div><div className="action-title">Freeze &amp;<br/>Investigate</div><div className="confidence"><span>AI CONFIDENCE</span><strong>96%</strong></div><ActionButton tone="danger">FREEZE 10 ACCOUNTS</ActionButton><ActionButton>ESCALATE CASE</ActionButton><ActionButton tone="ghost">MARK FALSE POSITIVE</ActionButton></Panel>
-      <Panel><SectionTitle title="Investigation notes" meta={<span className="small-meta">2 notes</span>}/><div className="note"><div className="avatar xs">AS</div><div><strong>Arjun Shah <span>· 02:51</span></strong><p>Pattern aligns with device-farm activity. Awaiting payout verification.</p></div></div><div className="note-field">Add investigation note…</div></Panel>
+      <Panel><SectionTitle eyebrow="EVIDENCE SUMMARY" title="Investigation Evidence"/><div className="evidence-tabs"><button className={evidenceTab === "transactions" ? "active" : ""} onClick={() => setEvidenceTab("transactions")}>Transactions <b>4</b></button><button className={evidenceTab === "accounts" ? "active" : ""} onClick={() => setEvidenceTab("accounts")}>Accounts <b>10</b></button><button className={evidenceTab === "devices" ? "active" : ""} onClick={() => setEvidenceTab("devices")}>Devices <b>3</b></button><button className={evidenceTab === "ai" ? "active" : ""} onClick={() => setEvidenceTab("ai")}>AI Explanation</button></div><div className="case-evidence">
+        {evidenceTab === "transactions" && <><div className="evidence-callout"><Icon name="shield"/><div><strong>Critical transaction</strong><span className="mono">TXN-10482 · ACC-9281 · ₹84,200</span></div><Badge tone="critical">94/100</Badge></div><p>Transaction was initiated from a newly observed device at an anomalous time and shares payout infrastructure with nine other accounts.</p></>}
+        {evidenceTab === "accounts" && <div className="evidence-grid">{[["ACC-9281", "94/100", "FROZEN"], ["ACC-10294", "91/100", "UNDER INVESTIGATION"], ["ACC-2208", "76/100", "MANUAL REVIEW"]].map(([account, score, status]) => <div className="evidence-mini-card" key={account}><Icon name="users"/><div><strong className="mono">{account}</strong><span>{status}</span></div><Badge tone="critical">{score}</Badge></div>)}</div>}
+        {evidenceTab === "devices" && <div className="evidence-grid">{[["DVC-77821", "7 connected accounts", "SHARED DEVICE"], ["DVC-21009", "3 connected accounts", "RELATED DEVICE"], ["DVC-44012", "Known account device", "OBSERVED"]].map(([device, detail, status]) => <div className="evidence-mini-card" key={device}><Icon name="device"/><div><strong className="mono">{device}</strong><span>{detail} · {status}</span></div><Icon name="chevron" size={14}/></div>)}</div>}
+        {evidenceTab === "ai" && <div className="ai-evidence-state"><div className="ai-evidence-icon"><Icon name="pulse" size={22}/></div><strong>{aiExplanation ? "Groq AI risk explanation" : "Generate AI risk explanation"}</strong>{aiExplanation ? <p className={aiStatus === "error" ? "ai-error-text" : ""}>{aiExplanation}</p> : <p>Generate a concise explanation from the transaction details and model evidence using the configured Groq backend.</p>}<button className="button ai-explain-button" onClick={requestAiExplanation} disabled={aiStatus === "loading"}>{aiStatus === "loading" ? "GENERATING..." : "GENERATE EXPLANATION"}</button>{aiStatus === "error" && <Badge tone="high">REQUEST FAILED</Badge>}</div>}
+      </div></Panel>
+    </div><div className="case-side"><Panel className={`action-card critical-action case-action-${caseAction}`}><div className="action-icon"><Icon name={caseAction === "false-positive" ? "close" : caseAction === "escalated" ? "pulse" : "shield"} size={25}/></div><div className="eyebrow">{actionCopy.eyebrow}</div><div className="action-risk">{actionCopy.risk}</div><div className="action-title">{actionCopy.title}</div><div className="confidence"><span>AI CONFIDENCE</span><strong>{caseAction === "false-positive" ? "REVIEWED" : "96%"}</strong></div><div className="case-action-message" role="status">{actionCopy.status}</div>{caseAction === "open" && <><ActionButton tone="danger" onClick={() => setCaseAction("frozen")}>FREEZE 10 ACCOUNTS</ActionButton><ActionButton onClick={() => setCaseAction("escalated")}>ESCALATE CASE</ActionButton><ActionButton tone="ghost" onClick={() => setCaseAction("false-positive")}>MARK FALSE POSITIVE</ActionButton></>}{caseAction !== "open" && <ActionButton tone="ghost" onClick={() => setCaseAction("open")}>BACK TO CASE ACTIONS</ActionButton>}</Panel>
+      <Panel><SectionTitle title="Investigation notes" meta={<span className="small-meta">{notes.length} {notes.length === 1 ? "note" : "notes"}</span>}/><div className="notes-list">{notes.map((note, index) => <div className="note" key={`${note.time}-${index}`}><div className="avatar xs">{note.initials}</div><div><strong>{note.author} <span>· {note.time}</span></strong><p>{note.text}</p></div></div>)}</div><form className="note-form" onSubmit={(event) => { event.preventDefault(); const text = noteText.trim(); if (!text) return; const now = new Date(); const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }); setNotes((current) => [...current, { author: "Arjun Shah", initials: "AS", time, text }]); setNoteText(""); }}><input className="note-field" value={noteText} onChange={(event) => setNoteText(event.target.value)} placeholder="Add investigation note…" aria-label="Add investigation note"/><button className="note-submit" type="submit" disabled={!noteText.trim()}>ADD NOTE</button></form></Panel>
     </div></div>
   </main></>;
 }
@@ -498,7 +565,7 @@ function HomePage({ onNavigate }: { onNavigate: (page: EntryPage) => void }) {
   </EntryShell>;
 }
 
-function LoginPage({ onNavigate, onSuccess }: { onNavigate: (page: EntryPage) => void; onSuccess: () => void }) {
+function LoginPage({ onNavigate, onSuccess }: { onNavigate: (page: EntryPage) => void; onSuccess: (email: string) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
@@ -508,7 +575,7 @@ function LoginPage({ onNavigate, onSuccess }: { onNavigate: (page: EntryPage) =>
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError("Enter a valid analyst email.");
     if (!password) return setError("Password is required.");
     setError("");
-    onSuccess();
+    onSuccess(email);
   };
   return <EntryShell onNavigate={onNavigate}>
     <main className="auth-main">
@@ -561,13 +628,20 @@ function SecureTransition({ onComplete }: { onComplete: () => void }) {
   return <div className="transition-screen"><div className="transition-card"><div className="brand-mark"><Icon name="shield" size={24} /></div><div className="eyebrow cyan">FININTEL</div><h1>SECURE SESSION ESTABLISHED</h1><div className="transition-checks"><span>✓ Identity verified</span><span>✓ Fraud intelligence engine connected</span><span>✓ Network analysis available</span></div><div className="transition-entering">ENTERING COMMAND CENTER<span>...</span></div></div></div>;
 }
 
+function analystNameFromEmail(email: string) {
+  const localPart = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+  return localPart.split(" ").filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(" ") || "Analyst";
+}
+
 function App() {
   const initialPath = window.location.pathname;
   const initialPage: EntryPage = initialPath === "/login" ? "login" : initialPath === "/register" ? "register" : initialPath === "/dashboard" ? "dashboard" : "home";
   const [entryPage, setEntryPage] = useState<EntryPage>(initialPage);
   const [screen, setScreen] = useState("command");
   const [compact, setCompact] = useState(false);
-  const [, setSelectedTransaction] = useState("TXN-10482");
+  const [analystName, setAnalystName] = useState("Arjun Shah");
+  const [transactionRows, setTransactionRows] = useState<TransactionRow[]>(transactions);
+  const [selectedTransaction, setSelectedTransaction] = useState("TXN-10482");
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname;
@@ -582,19 +656,19 @@ function App() {
     setEntryPage(page);
   };
   const content = useMemo(() => {
-    if (screen === "transactions") return <Transactions setScreen={setScreen} selectTransaction={setSelectedTransaction}/>;
-    if (screen === "transaction-detail") return <TransactionDetail setScreen={setScreen}/>;
+    if (screen === "transactions") return <Transactions setScreen={setScreen} selectTransaction={setSelectedTransaction} transactionRows={transactionRows} onTransactionsAdded={(rows) => setTransactionRows((current) => [...rows, ...current])}/>;
+    if (screen === "transaction-detail") return <TransactionDetail setScreen={setScreen} transaction={transactionRows.find((row) => row.id === selectedTransaction)}/>;
     if (screen === "accounts") return <Accounts setScreen={setScreen}/>;
     if (screen === "network") return <NetworkScreen setScreen={setScreen}/>;
     if (screen === "investigations") return <Investigations/>;
     if (screen === "model") return <ModelInsights/>;
     return <CommandCenter setScreen={setScreen} selectTransaction={setSelectedTransaction}/>;
-  }, [screen]);
+  }, [screen, transactionRows, selectedTransaction]);
   if (entryPage === "home") return <HomePage onNavigate={navigateEntry}/>;
-  if (entryPage === "login") return <LoginPage onNavigate={navigateEntry} onSuccess={() => { window.history.pushState({}, "", "/dashboard"); setEntryPage("transition"); }}/>;
+  if (entryPage === "login") return <LoginPage onNavigate={navigateEntry} onSuccess={(email) => { setAnalystName(analystNameFromEmail(email)); window.history.pushState({}, "", "/dashboard"); setEntryPage("transition"); }}/>;
   if (entryPage === "register") return <RegisterPage onNavigate={navigateEntry}/>;
   if (entryPage === "transition") return <SecureTransition onComplete={() => setEntryPage("dashboard")}/>;
-  return <div className="app-shell"><Sidebar screen={screen === "transaction-detail" ? "transactions" : screen} setScreen={setScreen} compact={compact} setCompact={setCompact}/><div className="app-main">{content}</div></div>;
+  return <div className="app-shell"><Sidebar screen={screen === "transaction-detail" ? "transactions" : screen} setScreen={setScreen} compact={compact} setCompact={setCompact} analystName={analystName}/><div className="app-main">{content}</div></div>;
 }
 
 export default App;
