@@ -89,6 +89,33 @@ function formatReason(reason: string): string {
   return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : "No positive risk factors returned";
 }
 
+type TransactionInput = {
+  account_id: string;
+  timestamp: string;
+  amount: string;
+  merchant: string;
+  item: string;
+  device_id: string;
+  location: string;
+  payout_account: string;
+};
+
+const transactionFields: { key: keyof TransactionInput; label: string; placeholder: string; type?: string }[] = [
+  { key: "account_id", label: "Account ID", placeholder: "ACC-9281" },
+  { key: "timestamp", label: "Timestamp", placeholder: "2026-10-07 02:43" },
+  { key: "amount", label: "Amount", placeholder: "84200", type: "number" },
+  { key: "merchant", label: "Merchant", placeholder: "ElectroMart" },
+  { key: "item", label: "Item", placeholder: "Premium Electronics" },
+  { key: "device_id", label: "Device ID", placeholder: "DVC-77821" },
+  { key: "location", label: "Location", placeholder: "Chennai" },
+  { key: "payout_account", label: "Payout Account", placeholder: "PAY-1032" },
+];
+
+const emptyTransaction: TransactionInput = {
+  account_id: "", timestamp: "", amount: "", merchant: "", item: "",
+  device_id: "", location: "", payout_account: "",
+};
+
 const navItems: { label: string; icon: IconName; screen: string }[] = [
   { label: "Command Center", icon: "grid", screen: "command" },
   { label: "Transactions", icon: "swap", screen: "transactions" },
@@ -368,7 +395,90 @@ function CommandCenter({ setScreen, selectTransaction }: { setScreen: (s: string
   </>;
 }
 
+function TransactionEntry({ onBack, onScored }: { onBack: () => void; onScored: (transactionId: string) => void }) {
+  const [form, setForm] = useState(emptyTransaction);
+  const [errors, setErrors] = useState<Partial<Record<keyof TransactionInput, string>>>({});
+  const [status, setStatus] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [requestError, setRequestError] = useState(false);
+  const update = (key: keyof TransactionInput) => (event: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: event.target.value });
+  const validate = () => {
+    const next: Partial<Record<keyof TransactionInput, string>> = {};
+    transactionFields.forEach(({ key }) => { if (key !== "payout_account" && !form[key].trim()) next[key] = "This field is required."; });
+    if (form.amount && (!Number.isFinite(Number(form.amount)) || Number(form.amount) <= 0)) next.amount = "Please enter a valid transaction amount.";
+    if (form.timestamp && Number.isNaN(Date.parse(form.timestamp))) next.timestamp = "Please enter a valid timestamp.";
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+  const analyze = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!validate()) return;
+    setSubmitting(true);
+    setRequestError(false);
+    setStatus("");
+    try {
+      const response = await fetch("/api/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, amount: Number(form.amount), payout_account: form.payout_account || null, transaction_type: "payment" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Transaction scoring failed");
+      onScored(data.transaction_id);
+    } catch (error) {
+      setRequestError(true);
+      setStatus(error instanceof Error ? error.message : "Unable to retrieve fraud intelligence. Check backend connection.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return <><AppHeader title="Transaction Analysis" subtitle="Submit a transaction to the trained fraud model and graph pipeline."/><main className="content">
+    <div className="breadcrumb"><span onClick={onBack}>Transactions</span><Icon name="chevron" size={13}/><strong>Enter transaction</strong></div>
+    <form className="transaction-workflow" onSubmit={analyze} noValidate>
+      <Panel className="workflow-panel"><SectionTitle eyebrow="MANUAL ANALYSIS" title="Transaction details" meta={<Badge tone="info">LIVE XGBOOST</Badge>}/><p className="workflow-help">Enter the transaction details to score them with the live model and graph analysis.</p>
+        <div className="transaction-form-grid">{transactionFields.map(({ key, label, placeholder, type }) => <label key={key} className={key === "timestamp" ? "timestamp-field" : ""}>{label}<input type={type || "text"} value={form[key]} onChange={update(key)} placeholder={placeholder} aria-invalid={Boolean(errors[key])}/>{errors[key] && <span className="field-error">{errors[key]}</span>}</label>)}</div>
+        {status && <div className={`workflow-status ${requestError ? "error" : ""}`} role={requestError ? "alert" : "status"}><strong>{requestError ? "SCORING FAILED" : "SCORING"}</strong><span>{status}</span></div>}
+        <div className="workflow-actions"><ActionButton tone="ghost" onClick={onBack}>CANCEL</ActionButton><button className="button primary-workflow-button" type="submit" disabled={submitting}>{submitting ? "SCORING..." : "ANALYZE TRANSACTION →"}</button></div>
+      </Panel>
+      <Panel className="pipeline-panel"><div className="eyebrow cyan">LIVE ANALYSIS PIPELINE</div><div className="pipeline-steps">{["Feature engineering", "Trained XGBoost model", "Fraud probability + risk score", "Contribution-derived reasons", "Network and ring analysis", "Recommended action"].map((step, index) => <div key={step}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong>{index < 5 && <i>↓</i>}</div>)}</div><div className="demo-notice"><span className="live-dot"/><div><strong>Backend scoring enabled</strong><p>The result opens with the model prediction, reasons, graph context, and recommended action.</p></div></div></Panel>
+    </form>
+  </main></>;
+}
+
+function CsvUpload({ onBack }: { onBack: () => void }) {
+  const [fileName, setFileName] = useState("");
+  const [preview, setPreview] = useState<string[][]>([]);
+  const [error, setError] = useState("");
+  const required = transactionFields.map(({ key }) => key);
+  const parseCsv = (text: string) => text.trim().split(/\r?\n/).map((line) => line.split(",").map((cell) => cell.trim()));
+  const chooseFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name); setError("");
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rows = parseCsv(String(reader.result || ""));
+      const headers = rows[0] || [];
+      const missing = required.filter((column) => !headers.includes(column));
+      if (missing.length) { setPreview([]); setError(`INVALID CSV FORMAT — Missing columns: ${missing.join(", ")}`); return; }
+      setPreview(rows.slice(0, 6));
+    };
+    reader.onerror = () => setError("Unable to read this CSV file.");
+    reader.readAsText(file);
+  };
+  return <><AppHeader title="Batch Transaction Analysis" subtitle="Upload transaction records to analyze multiple transactions simultaneously."/><main className="content">
+    <div className="breadcrumb"><span onClick={onBack}>Transactions</span><Icon name="chevron" size={13}/><strong>Upload transactions</strong></div>
+    <Panel className="upload-panel"><SectionTitle eyebrow="BATCH ANALYSIS" title="Upload transaction records" meta={<Badge tone="info">CSV</Badge>}/><p className="workflow-help">Validate your file before analysis. The first row must contain the expected column names.</p>
+      <div className="upload-dropzone"><Icon name="swap" size={24}/><strong>{fileName || "Choose a CSV file"}</strong><span>CSV files only · up to 10,000 rows</span><label className="button">CHOOSE CSV FILE<input type="file" accept=".csv,text/csv" onChange={chooseFile}/></label></div>
+      <div className="upload-tools"><button type="button" className="text-button" onClick={() => { const blob = new Blob([`${required.join(",")}\n`], { type: "text/csv" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "transaction-template.csv"; link.click(); URL.revokeObjectURL(url); }}>DOWNLOAD CSV TEMPLATE</button><span>Expected columns: <span className="mono">{required.join(", ")}</span></span></div>
+      {error && <div className="csv-error" role="alert">{error}</div>}
+      {preview.length > 0 && <><div className="preview-meta"><strong>VALIDATED PREVIEW</strong><span>{Math.max(preview.length - 1, 0)} preview rows · batch scoring is not configured</span></div><div className="table-wrap preview-table"><table><thead><tr>{preview[0].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{preview.slice(1).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={`${index}-${cellIndex}`}>{cell}</td>)}</tr>)}</tbody></table></div><div className="workflow-actions"><ActionButton tone="ghost" onClick={onBack}>CANCEL</ActionButton><button type="button" className="button primary-workflow-button" disabled>BATCH SCORING NOT CONFIGURED</button></div></>}
+    </Panel>
+  </main></>;
+}
+
 function Transactions({ setScreen, selectTransaction }: { setScreen: (s: string) => void; selectTransaction: (id: string) => void }) {
+  const [mode, setMode] = useState<"overview" | "manual" | "csv">("overview");
   const result = useApiData<TransactionRecord[]>("/api/transactions");
   const transactions = (result.data ?? []).slice().sort((a, b) => b.risk_score - a.risk_score).slice(0, 100);
   const rows = transactions.map((item) => ({
@@ -381,7 +491,10 @@ function Transactions({ setScreen, selectTransaction }: { setScreen: (s: string)
     risk: riskTone(item.risk_score),
     time: new Date(item.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }),
   }));
-  return <><AppHeader title="Transaction Intelligence" subtitle="Analyze transaction behavior and AI-generated risk factors."/><main className="content">
+  if (mode === "manual") return <TransactionEntry onBack={() => setMode("overview")} onScored={(id) => { selectTransaction(id); setScreen("transaction-detail"); }}/>;
+  if (mode === "csv") return <CsvUpload onBack={() => setMode("overview")}/>;
+  return <><AppHeader title="Transaction Intelligence" subtitle="Analyze transactions for behavioral risk, suspicious activity, and fraud-network connections."/><main className="content">
+    <div className="analysis-options"><Panel className="analysis-option"><div className="analysis-option-icon"><Icon name="swap" size={25}/></div><div><div className="eyebrow cyan">OPTION A</div><div className="section-title">Enter transaction</div><p>Analyze a single transaction using the fraud intelligence engine.</p></div><button className="button" onClick={() => setMode("manual")}>ENTER TRANSACTION <span>→</span></button></Panel><Panel className="analysis-option"><div className="analysis-option-icon"><Icon name="case" size={25}/></div><div><div className="eyebrow cyan">OPTION B</div><div className="section-title">Upload transactions</div><p>Upload a CSV file to analyze multiple transactions.</p></div><button className="button" onClick={() => setMode("csv")}>UPLOAD TRANSACTIONS <span>→</span></button></Panel></div>
     <Panel className="filter-panel"><div className="filter-grid"><Filter label="Search transaction, account, device…" wide/><Filter label="All risk levels"/><Filter label="Last 24 hours"/><Filter label="All merchants"/><Filter label="All locations"/><Filter label="All statuses"/><ActionButton tone="ghost" icon="filter">Clear filters</ActionButton></div></Panel>
     <Panel className="transactions-panel"><SectionTitle eyebrow={`${(result.data?.length ?? 0).toLocaleString()} SCORED TRANSACTIONS`} title="Transaction Activity" meta={<Badge tone="info">RANKED BY RISK</Badge>}/>
       {result.loading || result.error ? <ApiNotice loading={result.loading} error={result.error}/> : rows.length === 0 ? <ApiNotice loading={false} error={false} empty/> : <><TransactionTable rows={rows} limit={100} onSelect={(id) => {selectTransaction(id); setScreen("transaction-detail");}}/><div className="table-footer"><span>Showing {rows.length} highest-risk transactions</span><span>Scores from the trained XGBoost model</span></div></>}

@@ -1,5 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap");
 @import "tailwindcss";
+@import "./transaction-workflow.css";
 
 .api-notice{padding:18px 20px;color:var(--muted);font-size:10px}.api-notice.error{color:#ffaaa4;background:rgba(148,43,43,.12)}
 .clear-pulse{border-color:#25453d;background:linear-gradient(120deg,#111d20 0%,#101923 58%,#151d1e 100%)}.clear-pulse::before{background:var(--green)}.pulse-empty-copy{max-width:530px;margin:8px 0;color:var(--muted);font-size:11px;line-height:1.7}
