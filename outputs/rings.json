@@ -1,0 +1,44 @@
+[
+  {
+    "ring_id": "R1",
+    "accounts": [
+      "R000",
+      "R001",
+      "R002",
+      "R003",
+      "R004",
+      "R005",
+      "R006",
+      "R007",
+      "R008",
+      "R009"
+    ],
+    "n_accounts": 10,
+    "shared_devices": [
+      "D_RING_1",
+      "D_RING_2",
+      "D_RING_3"
+    ],
+    "shared_payout_accounts": [
+      "PAYOUT_X"
+    ],
+    "common_sequence": [
+      "gift_card",
+      "prepaid_card",
+      "game_credits",
+      "p2p_transfer"
+    ],
+    "signals": {
+      "members_flagged": true,
+      "shared_payout": true,
+      "same_sequence": true
+    },
+    "pattern": "10 accounts share 3 device(s) (D_RING_1, D_RING_2, D_RING_3) and payout account PAYOUT_X; 10 of 10 follow the same purchase sequence: gift_card -> prepaid_card -> game_credits -> p2p_transfer; 10 of 10 have flagged transactions",
+    "flagged_txns": 120,
+    "flagged_amount": 22180.58,
+    "first_flagged": "2026-01-16 16:47:00",
+    "last_flagged": "2026-02-26 15:17:00",
+    "ring_score": 1.0,
+    "action": "FREEZE all member accounts and investigate; block payout account"
+  }
+]
