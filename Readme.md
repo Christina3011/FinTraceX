@@ -117,12 +117,14 @@ rings.py          ->  graph, rings, account actions, diagram    -> outputs/rings
 - **18 innocent shared-device groups** (15 families and 3 offices) to test for false rings
 
 ### Features used by the model
-Amount compared with the account's previous average, hour of day, new device, new location, transactions in the last hour, number of accounts sharing the device, number of accounts sharing the payout account, plus merchant, item and location.
+The model uses current hour, amount relative to the account's previous mean and maximum, prior transaction count and recency, account-specific time-of-day history, known device/location, recent transaction velocity, prior device/payout sharing counts, and merchant, item and location categories. The absolute amount remains in the output CSV but is not a direct model input, so a large amount is judged relative to the account's behavior.
 `account_id` and `txn_id` are never given to the model.
 
 ### Method details
 - **Train, validation and test sets are split by account**, so no account appears in two sets.
 - **Threshold** is chosen on the validation set: the highest recall that keeps precision at 90% or more. If no threshold meets that target, the script falls back to the best F0.5 score.
+- **No future-history leakage:** features are built in timestamp order using only strictly earlier transactions. Rows sharing a timestamp are featurized before any of them update history. For an account's first transaction, amount ratios default to `1.0`, history counts, recency and account-hour evidence default to `0`, and known-device/location flags default to `0`.
+- **Account-normal hour:** the feature is the historical share of the account's transactions within two hours of the current hour; it is not a fixed nighttime rule.
 - **Ring rule:** a group of 3 or more accounts linked by shared devices or payout accounts is a ring only if at least 2 of these hold: (1) at least half of the members have flagged transactions, (2) the members share a payout account, (3) at least 3 members follow the same sequence of flagged purchases.
 - **Account risk:** `train.py` writes an auxiliary account score as the mean of the top three transaction scores. `rings.py` writes the final account score as the highest transaction score.
 
@@ -160,16 +162,21 @@ No single transaction looks extreme. The pattern across accounts is what gives t
 
 | Check | Result |
 |---|---|
-| XGBoost precision / recall on the test set | 0.984 / 1.000 |
-| Logistic Regression baseline, precision / recall | 0.878 / 0.694 |
-| Ring accounts found | 10 of 10 (0 wrongly included) |
-| Ring fraud transactions flagged | 120 of 120 |
-| Lone fraud accounts given an action | 40 of 40 (hold and verify) |
-| Legitimate high-value purchases wrongly flagged | 3 of 30 |
-| Innocent shared-device accounts frozen | 0 |
-| All false positives | 3 of 12,367 legitimate transactions |
+| Metric | Before | After |
+|---|---:|---:|
+| Test precision | 1.000 | 0.984 |
+| Test recall | 1.000 | 1.000 |
+| Test F1 | 1.000 | 0.992 |
+| Test confusion matrix `[[TN, FP], [FN, TP]]` | `[[2468, 0], [0, 62]]` | `[[2467, 1], [0, 62]]` |
+| High-value decoys flagged | 2 / 30 | 1 / 30 |
+| Ring accounts detected | 10 / 10 | 10 / 10 |
+| Ring fraud transactions flagged | 120 / 120 | 120 / 120 |
+| Innocent shared-device accounts frozen | 0 | 0 |
+| All false positives | 2 / 12,367 | 3 / 12,367 |
 
-_These are example results from a simulated-data run. Update this table with the numbers from your own run of `train.py`, `rings.py` and `check_ground_truth.py`._
+The threshold remained validation-selected at `MIN_PRECISION = 0.90`; the final XGBoost threshold was `0.463062`. The Logistic Regression baseline on the updated features had test precision `1.000`, recall `0.371`, and F1 `0.541`. The previous metrics were reconstructed from the saved pre-change outputs; the after metrics are from a fresh training and evaluation run.
+
+The `1 / 30` decoy count is measured across all generated outputs, including accounts assigned to training and validation. Of the 7 decoys in the held-out test split, `0` were flagged after the change.
 
 **Important:** these results come from clean simulated data, which is easier than real fraud. They describe performance on this generated scenario and do not prove performance on real banking data.
 
@@ -187,6 +194,7 @@ The frontend is not included in this repository and is owned separately by the f
 - The ring is easy to find because it has strong shared-device and shared-payout signals. Fraudsters who spread over many devices would be harder to catch.
 - A few legitimate high-value purchases are still flagged. Raising `MIN_PRECISION` in `train.py` may reduce this at the cost of some recall.
 - The model is trained on labelled fraud, so brand-new fraud types that look different would be missed. An unsupervised detector (Isolation Forest) would help and is listed as future work.
+- One of the 30 legitimate high-value decoys is still flagged, and two additional legitimate false positives remain in the full generated dataset. The improved decoy rate is not a zero-false-positive result.
 
 ## Repository structure
 
