@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 outputs/model.cbm
 .DS_Store
+node_modules/
+dist/

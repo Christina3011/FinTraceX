@@ -1,0 +1,10 @@
+{
+  "description": "AI-powered platform for financial institutions to detect, analyze, and investigate fraud in real time using risk scoring, network analysis, and actionable insights.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
