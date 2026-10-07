@@ -47,14 +47,47 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
 
 type Risk = "safe" | "medium" | "high" | "critical";
 
-const transactions = [
-  { id: "TXN-10482", account: "ACC-9281", amount: "₹84,200", merchant: "ElectroMart", score: 94, reason: "New device + network", risk: "critical" as Risk, time: "02:43" },
-  { id: "TXN-10481", account: "ACC-1823", amount: "₹12,500", merchant: "TechWorld", score: 61, reason: "Unusual location", risk: "medium" as Risk, time: "02:41" },
-  { id: "TXN-10480", account: "ACC-5512", amount: "₹2,400", merchant: "FreshMart", score: 8, reason: "Normal behavior", risk: "safe" as Risk, time: "02:38" },
-  { id: "TXN-10479", account: "ACC-10294", amount: "₹46,900", merchant: "Digital Hub", score: 88, reason: "Shared payout account", risk: "high" as Risk, time: "02:34" },
-  { id: "TXN-10478", account: "ACC-6751", amount: "₹7,820", merchant: "Urban Store", score: 24, reason: "Known pattern", risk: "safe" as Risk, time: "02:29" },
-  { id: "TXN-10477", account: "ACC-2208", amount: "₹31,200", merchant: "Gadget Galaxy", score: 76, reason: "Velocity anomaly", risk: "high" as Risk, time: "02:27" },
-];
+type ApiState<T> = { data: T | null; loading: boolean; error: boolean };
+
+function useApiData<T>(path: string | null): ApiState<T> {
+  const [state, setState] = useState<ApiState<T>>({ data: null, loading: true, error: false });
+  useEffect(() => {
+    if (!path) {
+      setState({ data: null, loading: false, error: false });
+      return;
+    }
+    const controller = new AbortController();
+    setState({ data: null, loading: true, error: false });
+    void fetch(path, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+        return response.json() as Promise<T>;
+      })
+      .then((data) => setState({ data, loading: false, error: false }))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setState({ data: null, loading: false, error: true });
+      });
+    return () => controller.abort();
+  }, [path]);
+  return state;
+}
+
+function ApiNotice({ loading, error, empty = false }: { loading: boolean; error: boolean; empty?: boolean }) {
+  if (loading) return <div className="api-notice" role="status">Loading intelligence...</div>;
+  if (error) return <div className="api-notice error" role="alert">Unable to retrieve fraud intelligence. Check backend connection.</div>;
+  if (empty) return <div className="api-notice">No suspicious activity detected.</div>;
+  return null;
+}
+
+function riskTone(score: number): Risk {
+  return score >= 80 ? "critical" : score >= 60 ? "high" : score >= 30 ? "medium" : "safe";
+}
+
+function formatReason(reason: string): string {
+  const cleaned = reason.replace(/_/g, " ").trim();
+  return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : "No positive risk factors returned";
+}
 
 const navItems: { label: string; icon: IconName; screen: string }[] = [
   { label: "Command Center", icon: "grid", screen: "command" },
@@ -124,11 +157,11 @@ function RiskBar({ label, value, tone }: { label: string; value: number; tone: R
   return <div className="risk-row"><div className="risk-row-meta"><span><span className={`legend-dot ${tone}`}/>{label}</span><strong>{value}%</strong></div><div className="bar-track"><span className={tone} style={{width: `${value}%`}}/></div></div>;
 }
 
-function TransactionTable({ onSelect, limit }: { onSelect: (id: string) => void; limit?: number }) {
-  const rows = limit ? transactions.slice(0, limit) : transactions;
+function TransactionTable({ onSelect, limit, rows }: { onSelect: (id: string) => void; limit?: number; rows: Array<{ id: string; account: string; amount: string; merchant: string; score: number; reason: string; risk: Risk; time: string }> }) {
+  const transactionRows = rows.slice(0, limit ?? undefined);
   return <div className="table-wrap"><table>
     <thead><tr><th>Transaction</th><th>Account</th><th>Amount</th><th>Merchant</th><th>Risk score</th><th>Reason</th><th>Action</th></tr></thead>
-    <tbody>{rows.map((tx) => <tr key={tx.id} onClick={() => onSelect(tx.id)}>
+    <tbody>{transactionRows.map((tx) => <tr key={tx.id} onClick={() => onSelect(tx.id)}>
       <td><span className="mono primary-id">{tx.id}</span><span className="row-time">{tx.time} AM</span></td>
       <td><span className="mono">{tx.account}</span></td><td className="amount">{tx.amount}</td><td>{tx.merchant}</td>
       <td><div className="score-cell"><strong>{String(tx.score).padStart(2, "0")}</strong><span>/100</span><span className={`score-line ${tx.risk}`} style={{width: `${Math.max(tx.score, 12)}%`}}/></div></td>
@@ -137,199 +170,375 @@ function TransactionTable({ onSelect, limit }: { onSelect: (id: string) => void;
   </table></div>;
 }
 
-function CommandConvergence({ onOpen }: { onOpen: () => void }) {
-  const entities = [
-    { x: 260, y: 140, className: "incident", type: "ACTIVE INCIDENT", label: "INV-00291" },
-    { x: 76, y: 140, className: "account", type: "ACCOUNT", label: "ACC-9281" },
-    { x: 260, y: 36, className: "device", type: "DEVICE", label: "DVC-77821" },
-    { x: 444, y: 140, className: "payout", type: "PAYOUT", label: "PAY-1032" },
-    { x: 260, y: 244, className: "ring", type: "FRAUD RING", label: "RING-03" },
-  ];
-  return <div className="command-convergence" role="button" tabIndex={0} onClick={onOpen}>
-    <svg viewBox="0 0 520 280" role="img" aria-label="Active incident connected to an account, device, payout account and fraud ring">
-      <g className="convergence-edges">
-        <line x1="108" y1="140" x2="214" y2="140"/><line x1="260" y1="65" x2="260" y2="104"/>
-        <line x1="306" y1="140" x2="410" y2="140"/><line x1="260" y1="176" x2="260" y2="215"/>
-        <circle cx="160" cy="140" r="3"/><circle cx="260" cy="84" r="3"/><circle cx="360" cy="140" r="3"/><circle cx="260" cy="197" r="3"/>
-      </g>
-      {entities.map((entity) => <g key={entity.label} className={`convergence-node ${entity.className}`} transform={`translate(${entity.x} ${entity.y})`}>
-        <rect x={entity.className === "incident" ? -46 : -34} y={entity.className === "incident" ? -36 : -29} width={entity.className === "incident" ? 92 : 68} height={entity.className === "incident" ? 72 : 58} rx="10"/>
-        <text className="convergence-type" textAnchor="middle" y="-6">{entity.type}</text><text className="convergence-label" textAnchor="middle" y="11">{entity.label}</text>
-        {entity.className === "incident" && <text className="convergence-risk" textAnchor="middle" y="25">94 · CRITICAL</text>}
-      </g>)}
-    </svg>
-    <div className="convergence-caption"><span><i/>4 suspicious relationships confirmed</span><strong>VIEW NETWORK →</strong></div>
-  </div>;
+type DashboardSummary = {
+  total_transactions: number;
+  flagged_transactions: number;
+  suspicious_transactions: number;
+  high_risk_transactions: number;
+  average_risk_score: number;
+  critical_count: number;
+  risk_distribution: Record<string, number>;
+  active_investigations: number;
+  fraud_rings: number;
+};
+type DashboardSignal = { transaction_id: string; account_id: string; risk_score: number; risk_level: string; reason: string; recommended_action: string };
+type DashboardAlert = DashboardSignal & { fraud_probability: number; reasons: string[] };
+type TransactionRecord = {
+  transaction_id: string;
+  account_id: string;
+  amount: number;
+  merchant: string;
+  item: string;
+  location: string;
+  device_id: string;
+  timestamp: string;
+  risk_score: number;
+  risk_level: string;
+  fraud_probability: number;
+  is_fraud: boolean;
+  reasons: string[];
+  recommended_action: string;
+  payout_account?: string | null;
+  connected_accounts?: string[];
+  shared_devices?: string[];
+  shared_payout_accounts?: string[];
+  fraud_ring?: { ring_id: string; members?: string[]; pattern?: string } | null;
+};
+type AccountRecord = {
+  account_id: string;
+  risk_score: number;
+  risk_level: string;
+  transaction_count: number;
+  high_risk_transactions: number;
+  status: string;
+  recommended_action: string;
+  reason: string;
+  ring_id: string | null;
+  connected_accounts: string[];
+  connected_devices: string[];
+  payout_accounts: string[];
+};
+type RingSummary = {
+  ring_id: string;
+  accounts: string[];
+  account_ids?: string[];
+  member_count?: number;
+  shared_devices: string[];
+  shared_payout_accounts: string[];
+  common_sequence: string[];
+  pattern: string;
+  flagged_txns: number;
+  flagged_amount: number;
+  ring_score: number;
+  action: string;
+};
+type RingDetail = RingSummary & { member_accounts: Array<AccountRecord & { connections: { connected_accounts: string[]; devices: string[]; payout_accounts: string[] } }> };
+type InvestigationSummary = {
+  investigation_id: string;
+  account_id: string;
+  transaction_id: string;
+  ring_id: string | null;
+  risk_score: number;
+  status: string;
+  flagged_transactions: number;
+  top_reason: string;
+  recommended_action: string;
+  last_activity: string | null;
+};
+type InvestigationDetail = InvestigationSummary & {
+  recommendation: string;
+  connected_entities: { connected_accounts: string[]; devices: string[]; payout_accounts: string[] };
+  timeline: Array<{ timestamp: string; transaction_id: string; event: string; risk_score: number; description: string }>;
+  transactions: TransactionRecord[];
+};
+
+function DemoTransactionForm({ onScored }: { onScored: (transactionId: string) => void }) {
+  const [form, setForm] = useState({ amount: "12500", account_id: "A-DEMO-001", merchant: "giftcards", item: "gift_card", location: "Mumbai", device_id: "D-DEMO-001", payout_account: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState(false);
+  const update = (field: keyof typeof form) => (event: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [field]: event.target.value });
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(false);
+    setMessage("");
+    try {
+      const response = await fetch("/api/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, amount: Number(form.amount), timestamp: new Date().toISOString(), transaction_type: "payment" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Transaction scoring failed");
+      setMessage(`${data.transaction_id} · ${Number(data.risk_score).toFixed(2)}/100 · ${data.risk_level}`);
+      onScored(data.transaction_id);
+    } catch {
+      setError(true);
+      setMessage("Unable to retrieve fraud intelligence. Check backend connection.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return <Panel className="demo-score-panel">
+    <SectionTitle eyebrow="LIVE MODEL · REAL-TIME INFERENCE" title="Score a transaction" meta={<Badge tone="info">XGBOOST</Badge>}/>
+    <form className="demo-score-form" onSubmit={submit}>
+      <label>AMOUNT<input type="number" min="1" step="0.01" required value={form.amount} onChange={update("amount")}/></label>
+      <label>ACCOUNT ID<input required value={form.account_id} onChange={update("account_id")}/></label>
+      <label>MERCHANT<input required value={form.merchant} onChange={update("merchant")}/></label>
+      <label>ITEM<input required value={form.item} onChange={update("item")}/></label>
+      <label>LOCATION<input required value={form.location} onChange={update("location")}/></label>
+      <label>DEVICE ID<input required value={form.device_id} onChange={update("device_id")}/></label>
+      <label>PAYOUT ACCOUNT<input value={form.payout_account} onChange={update("payout_account")} placeholder="Optional"/></label>
+      <button className="button" type="submit" disabled={submitting}>{submitting ? "SCORING..." : "SCORE TRANSACTION →"}</button>
+    </form>
+    {message && <div className={`demo-result ${error ? "error" : ""}`} role={error ? "alert" : "status"}>{message}</div>}
+    <div className="demo-flow">Transaction <span>↓</span> XGBoost <span>↓</span> Risk + reasons + graph + action</div>
+  </Panel>;
 }
 
 function CommandCenter({ setScreen, selectTransaction }: { setScreen: (s: string) => void; selectTransaction: (id: string) => void }) {
-  const openThreat = () => { selectTransaction("TXN-10482"); setScreen("transaction-detail"); };
-  const prioritySignals = [
-    { transaction: "TXN-10482", account: "ACC-9281", risk: 94, reason: "New device + network", action: "FREEZE", tone: "critical" as Risk },
-    { transaction: "TXN-10479", account: "ACC-10294", risk: 88, reason: "Shared payout account", action: "REVIEW", tone: "high" as Risk },
-    { transaction: "TXN-10477", account: "ACC-2208", risk: 76, reason: "Velocity anomaly", action: "REVIEW", tone: "high" as Risk },
-  ];
+  const summary = useApiData<DashboardSummary>("/api/dashboard/summary");
+  const alerts = useApiData<DashboardAlert[]>("/api/dashboard/alerts");
+  const priorities = useApiData<DashboardSignal[]>("/api/dashboard/priority-signals");
+  const featured = alerts.data?.[0];
+  const featuredDetail = useApiData<TransactionRecord>(featured ? `/api/transactions/${encodeURIComponent(featured.transaction_id)}` : null);
+  const loading = summary.loading || alerts.loading || priorities.loading;
+  const error = summary.error || alerts.error || priorities.error;
+  const currentSummary = summary.data;
+  const visiblePriorities = priorities.data ?? [];
+  const visibleAlerts = alerts.data ?? [];
+  const openTransaction = (id: string) => { selectTransaction(id); setScreen("transaction-detail"); };
+  const distribution = currentSummary?.risk_distribution ?? {};
+  const total = currentSummary?.total_transactions ?? 0;
+  const tone = featured ? riskTone(featured.risk_score) : "safe";
+
   return <>
-    <AppHeader title="FINANCIAL FRAUD INTELLIGENCE" subtitle="Real-time threat detection and fraud investigation" statusLabel="LIVE SYSTEM"/>
+    <AppHeader title="FINANCIAL FRAUD INTELLIGENCE" subtitle="Real model scores, explainable signals and connected-entity context" statusLabel="LIVE SYSTEM"/>
     <main className="content command-center">
-      <section className="threat-pulse">
+      <ApiNotice loading={loading} error={error}/>
+      <section className={`threat-pulse ${featured ? "" : "clear-pulse"}`}>
         <div className="pulse-rail">
-          <div className="pulse-heading"><div><div className="eyebrow cyan">THREAT PULSE</div><div className="pulse-title">Critical incident requires action</div></div><Badge tone="critical">ACTIVE INVESTIGATION</Badge></div>
-          <div className="incident-core">
-            <div className="incident-identity"><div className="incident-label"><span className="live-dot critical-live"/><span>CRITICAL INCIDENT</span></div><div className="incident-id mono">INV-00291</div>
-              <div className="incident-links"><div><span>ACCOUNT</span><strong className="mono">ACC-9281</strong></div><div><span>TRANSACTION</span><strong className="mono">TXN-10482</strong></div></div>
+          <div className="pulse-heading"><div><div className="eyebrow cyan">THREAT PULSE</div><div className="pulse-title">{featured ? "Highest current alert" : "Low current alert volume"}</div></div><Badge tone={tone}>{featured ? `${featured.risk_level} ALERT` : "NO ACTIVE ALERTS"}</Badge></div>
+          {featured ? <>
+            <div className="incident-core">
+              <div className="incident-identity"><div className="incident-label"><span className={`live-dot ${tone === "safe" ? "" : "critical-live"}`}/><span>MODEL-FLAGGED TRANSACTION</span></div><div className="incident-id mono">{featured.transaction_id}</div>
+                <div className="incident-links"><div><span>ACCOUNT</span><strong className="mono">{featured.account_id}</strong></div><div><span>FRAUD PROBABILITY</span><strong>{(featured.fraud_probability * 100).toFixed(2)}%</strong></div></div>
+              </div>
+              <div className="command-risk"><div className="command-score"><svg viewBox="0 0 110 110" aria-label={`Risk score ${featured.risk_score.toFixed(1)} out of 100`}><circle className="score-base" cx="55" cy="55" r="47"/><circle className="score-value" cx="55" cy="55" r="47" pathLength="100" style={{ strokeDasharray: `${Math.min(100, featured.risk_score)} 100` }}/></svg><div><strong>{Math.round(featured.risk_score)}</strong><span>/ 100</span></div></div><div className="command-risk-label"><span>RISK SCORE</span><strong>{featured.risk_level}</strong></div></div>
             </div>
-            <div className="command-risk"><div className="command-score"><svg viewBox="0 0 110 110" aria-label="Risk score 94 out of 100"><circle className="score-base" cx="55" cy="55" r="47"/><circle className="score-value" cx="55" cy="55" r="47" pathLength="100"/></svg><div><strong>94</strong><span>/ 100</span></div></div><div className="command-risk-label"><span>RISK SCORE</span><strong>CRITICAL</strong></div></div>
-          </div>
-          <div className="incident-story"><div className="story-kicker"><Icon name="pulse" size={16}/><span>AI RISK STORY</span></div><p><strong className="mono">ACC-9281</strong> normally operates within a predictable spending pattern. This transaction is significantly above normal behavior, occurred at an unusual time, originated from a new device and is connected to multiple accounts.</p><span className="story-link" role="button" tabIndex={0} onClick={openThreat}>VIEW FULL INVESTIGATION →</span></div>
+            <div className="incident-story"><div className="story-kicker"><Icon name="pulse" size={16}/><span>MODEL REASONS</span></div><p>{featured.reasons.length ? featured.reasons.map(formatReason).join(" · ") : "No positive model contributions were returned."}</p><span className="story-link" role="button" tabIndex={0} onClick={() => openTransaction(featured.transaction_id)}>OPEN TRANSACTION EVIDENCE →</span></div>
+          </> : <p className="pulse-empty-copy">The scored history currently contains no flagged transactions. Historical counts and risk distribution below reflect the saved model output.</p>}
         </div>
-        <div className="pulse-evidence"><div className="eyebrow">WHY THIS MATTERS</div><div className="command-signals">
-          {[["New device", "+32", 100],["Amount 4.8× account average", "+24", 75],["Unusual transaction time", "+18", 56],["Device shared with 7 accounts", "+15", 47],["Network connection", "+05", 16]].map(([label, score, width]) => <div className="command-signal" key={label as string}><div><span>{label}</span><strong>{score}</strong></div><div className="signal-track"><i style={{ width: `${width}%` }}/></div></div>)}
-        </div></div>
-        <div className="command-action"><div className="action-shield"><Icon name="shield" size={22}/></div><div className="eyebrow">RECOMMENDED ACTION</div><div className="command-action-title">Freeze &amp;<br/>Investigate</div><p>High transaction risk + coordinated network activity + shared device relationship.</p><ActionButton tone="danger" onClick={() => setScreen("investigations")}>OPEN INVESTIGATION →</ActionButton><ActionButton tone="ghost">MONITOR</ActionButton></div>
+        <div className="pulse-evidence"><div className="eyebrow">CONNECTED ENTITIES</div>
+          {featuredDetail.loading && featured ? <ApiNotice loading error={false}/> : featuredDetail.error && featured ? <ApiNotice loading={false} error/> : featured ? <div className="connected-summary">
+            <div><strong>{featuredDetail.data?.connected_accounts?.length ?? 0}</strong><span>connected accounts</span></div>
+            <div><strong>{featuredDetail.data?.shared_devices?.length ?? 0}</strong><span>shared devices</span></div>
+            <div><strong>{featuredDetail.data?.shared_payout_accounts?.length ?? 0}</strong><span>shared payouts</span></div>
+            <p>{featuredDetail.data?.fraud_ring?.pattern ?? "No qualifying fraud ring returned for this transaction."}</p>
+          </div> : <ApiNotice loading={false} error={false} empty/>}
+        </div>
+        <div className="command-action"><div className="action-shield"><Icon name="shield" size={22}/></div><div className="eyebrow">RECOMMENDED ACTION</div><div className="command-action-title">{featured ? featured.recommended_action : "Continue monitoring"}</div><p>{featured ? "Recommendation returned by the risk engine for this model-scored transaction." : "No active flagged transaction requires intervention right now."}</p>{featured && <ActionButton onClick={() => openTransaction(featured.transaction_id)}>REVIEW EVIDENCE →</ActionButton>}</div>
       </section>
       <div className="command-operations">
-        <Panel className="convergence-panel"><SectionTitle eyebrow="ACTIVE INCIDENT INTELLIGENCE" title="Threat Convergence" meta={<Badge tone="critical">4 LINKS</Badge>}/><CommandConvergence onOpen={() => setScreen("network")}/></Panel>
+        <Panel className="convergence-panel"><SectionTitle eyebrow="SAVED MODEL OUTPUT" title="Risk Distribution" meta={<span className="small-meta">{total.toLocaleString()} transactions</span>}/>
+          <div className="dashboard-risk-list">{[["LOW", "safe"], ["MEDIUM", "medium"], ["HIGH", "high"], ["CRITICAL", "critical"]].map(([level, risk]) => {
+            const count = distribution[level] ?? 0;
+            return <div className="dashboard-risk-row" key={level}><RiskBar label={level} value={total ? Math.round(count / total * 100) : 0} tone={risk as Risk}/><span>{count.toLocaleString()}</span></div>;
+          })}</div>
+          <p className="dashboard-caption">Percent of transactions by model risk level. Counts use the saved scored dataset.</p>
+        </Panel>
         <div className="operations-stack">
-          <Panel className="action-queue"><SectionTitle eyebrow="ORDERED BY URGENCY" title="Action Queue" meta={<span className="small-meta">25 open</span>}/><div className="queue-list">
-            <div role="button" tabIndex={0} onClick={() => setScreen("investigations")}><span className="queue-marker critical"/><strong>3</strong><span>FREEZE &amp; INVESTIGATE</span><Icon name="chevron" size={14}/></div>
-            <div role="button" tabIndex={0} onClick={() => setScreen("transactions")}><span className="queue-marker high"/><strong>8</strong><span>MANUAL REVIEW</span><Icon name="chevron" size={14}/></div>
-            <div role="button" tabIndex={0} onClick={() => setScreen("transactions")}><span className="queue-marker medium"/><strong>14</strong><span>MONITOR</span><Icon name="chevron" size={14}/></div>
+          <Panel className="action-queue"><SectionTitle eyebrow="CURRENT WORKLOAD" title="Intelligence Queue"/><div className="queue-list">
+            <div onClick={() => setScreen("investigations")} role="button" tabIndex={0}><span className="queue-marker critical"/><strong>{(currentSummary?.active_investigations ?? 0).toLocaleString()}</strong><span>ACTIVE INVESTIGATIONS</span><Icon name="chevron" size={14}/></div>
+            <div onClick={() => setScreen("network")} role="button" tabIndex={0}><span className="queue-marker high"/><strong>{(currentSummary?.fraud_rings ?? 0).toLocaleString()}</strong><span>DETECTED FRAUD RINGS</span><Icon name="chevron" size={14}/></div>
+            <div onClick={() => setScreen("transactions")} role="button" tabIndex={0}><span className="queue-marker medium"/><strong>{(currentSummary?.high_risk_transactions ?? 0).toLocaleString()}</strong><span>HIGH-RISK TRANSACTIONS</span><Icon name="chevron" size={14}/></div>
           </div></Panel>
-          <Panel className="priority-signals"><SectionTitle eyebrow="ACTIONABLE NOW" title="Priority Signals" meta={<span className="small-meta">Risk ≥ 75</span>}/><div className="priority-list">
-            {prioritySignals.map((signal) => <div className="priority-row" role="button" tabIndex={0} key={signal.transaction} onClick={() => { selectTransaction(signal.transaction); setScreen("transaction-detail"); }}><div><strong className="mono">{signal.transaction}</strong><span className="mono">{signal.account}</span></div><div className={`priority-score ${signal.tone}`}><strong>{signal.risk}</strong><span>/100</span></div><span className="priority-reason">{signal.reason}</span><Badge tone={signal.tone}>{signal.action}</Badge></div>)}
-          </div><div className="priority-footer" role="button" tabIndex={0} onClick={() => setScreen("transactions")}>VIEW ALL TRANSACTIONS →</div></Panel>
+          <Panel className="priority-signals"><SectionTitle eyebrow="RISK SCORE ≥ 30" title="Priority Signals"/><div className="priority-list">
+            {priorities.loading || priorities.error ? <ApiNotice loading={priorities.loading} error={priorities.error}/> : visiblePriorities.length === 0 ? <ApiNotice loading={false} error={false} empty/> : visiblePriorities.map((signal) => <div className="priority-row" role="button" tabIndex={0} key={signal.transaction_id} onClick={() => openTransaction(signal.transaction_id)}><div><strong className="mono">{signal.transaction_id}</strong><span className="mono">{signal.account_id}</span></div><div className={`priority-score ${riskTone(signal.risk_score)}`}><strong>{Math.round(signal.risk_score)}</strong><span>/100</span></div><span className="priority-reason">{formatReason(signal.reason)}</span><Badge tone={riskTone(signal.risk_score)}>{signal.recommended_action}</Badge></div>)}
+          </div><div className="priority-footer" role="button" tabIndex={0} onClick={() => setScreen("transactions")}>VIEW TRANSACTION HISTORY →</div></Panel>
         </div>
       </div>
-      <section className="system-snapshot"><div className="snapshot-label"><Icon name="pulse" size={15}/><div><strong>SYSTEM SNAPSHOT</strong><span>Live intelligence · updated 14 sec ago</span></div></div><div className="snapshot-metrics"><div><strong>48,291</strong><span>Transactions analyzed</span></div><div><strong>84</strong><span>Accounts at risk</span></div><div><strong>6</strong><span>Fraud rings detected</span></div><div><strong>327</strong><span>High-risk transactions</span></div></div><Badge tone="safe">SYSTEM HEALTHY</Badge></section>
+      <Panel className="priority-signals"><SectionTitle eyebrow="MODEL-FLAGGED HISTORY" title="Recent Alerts" meta={<span className="small-meta">{visibleAlerts.length} returned</span>}/>
+        {alerts.loading || alerts.error ? <ApiNotice loading={alerts.loading} error={alerts.error}/> : visibleAlerts.length === 0 ? <ApiNotice loading={false} error={false} empty/> : <div className="priority-list">{visibleAlerts.map((alert) => <div className="priority-row" role="button" tabIndex={0} key={alert.transaction_id} onClick={() => openTransaction(alert.transaction_id)}><div><strong className="mono">{alert.transaction_id}</strong><span className="mono">{alert.account_id}</span></div><div className={`priority-score ${riskTone(alert.risk_score)}`}><strong>{Math.round(alert.risk_score)}</strong><span>/100</span></div><span className="priority-reason">{alert.reasons.map(formatReason).join(" · ")}</span><Badge tone={riskTone(alert.risk_score)}>{alert.recommended_action}</Badge></div>)}</div>}
+      </Panel>
+      <section className="system-snapshot"><div className="snapshot-label"><Icon name="pulse" size={15}/><div><strong>SYSTEM SNAPSHOT</strong><span>Current saved model outputs</span></div></div><div className="snapshot-metrics"><div><strong>{(currentSummary?.total_transactions ?? 0).toLocaleString()}</strong><span>Transactions analyzed</span></div><div><strong>{(currentSummary?.suspicious_transactions ?? 0).toLocaleString()}</strong><span>Flagged transactions</span></div><div><strong>{(currentSummary?.active_investigations ?? 0).toLocaleString()}</strong><span>Active investigations</span></div><div><strong>{(currentSummary?.fraud_rings ?? 0).toLocaleString()}</strong><span>Fraud rings</span></div></div><Badge tone={error ? "high" : "safe"}>{error ? "API DEGRADED" : "MODEL DATA LOADED"}</Badge></section>
+      <DemoTransactionForm onScored={(id) => openTransaction(id)}/>
     </main>
   </>;
 }
 
 function Transactions({ setScreen, selectTransaction }: { setScreen: (s: string) => void; selectTransaction: (id: string) => void }) {
+  const result = useApiData<TransactionRecord[]>("/api/transactions");
+  const transactions = (result.data ?? []).slice().sort((a, b) => b.risk_score - a.risk_score).slice(0, 100);
+  const rows = transactions.map((item) => ({
+    id: item.transaction_id,
+    account: item.account_id,
+    amount: new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(item.amount),
+    merchant: item.merchant,
+    score: Math.min(100, Math.max(0, item.risk_score)),
+    reason: item.reasons[0] ? formatReason(item.reasons[0]) : "No positive model contribution",
+    risk: riskTone(item.risk_score),
+    time: new Date(item.timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }),
+  }));
   return <><AppHeader title="Transaction Intelligence" subtitle="Analyze transaction behavior and AI-generated risk factors."/><main className="content">
     <Panel className="filter-panel"><div className="filter-grid"><Filter label="Search transaction, account, device…" wide/><Filter label="All risk levels"/><Filter label="Last 24 hours"/><Filter label="All merchants"/><Filter label="All locations"/><Filter label="All statuses"/><ActionButton tone="ghost" icon="filter">Clear filters</ActionButton></div></Panel>
-    <Panel className="transactions-panel"><SectionTitle eyebrow="48,291 TOTAL · 327 HIGH RISK" title="Transaction Activity" meta={<div className="segmented"><span className="active">All</span><span>Flagged</span><span>Reviewed</span></div>}/><TransactionTable onSelect={(id) => {selectTransaction(id); setScreen("transaction-detail");}}/><div className="table-footer"><span>Showing 1–6 of 48,291</span><span className="pagination"><b>‹</b><b className="active">1</b><b>2</b><b>3</b><b>›</b></span></div></Panel>
-  </main></>;
-}
-
-const evidence = [
-  { score: 32, label: "NEW DEVICE", detail: "First seen 18 minutes ago", width: 100 },
-  { score: 24, label: "AMOUNT 4.8× ACCOUNT AVERAGE", detail: "₹84,200 vs ₹17,540 baseline", width: 75 },
-  { score: 18, label: "UNUSUAL TRANSACTION TIME", detail: "Outside typical 9 AM–8 PM window", width: 56 },
-  { score: 15, label: "DEVICE SHARED WITH 7 ACCOUNTS", detail: "4 linked accounts currently flagged", width: 47 },
-  { score: 5, label: "NETWORK CONNECTION", detail: "Connected to Fraud Ring R-03", width: 16 },
-];
-
-function TransactionDetail({ setScreen }: { setScreen: (s: string) => void }) {
-  return <><AppHeader title="Transaction Investigation" subtitle="Review model evidence, behavioral context and connected risk."/><main className="content">
-    <div className="breadcrumb"><span onClick={() => setScreen("transactions")}>Transactions</span><Icon name="chevron" size={13}/><strong className="mono">TXN-10482</strong></div>
-    <Panel className="transaction-hero">
-      <div className="tx-heading"><div><div className="eyebrow">TRANSACTION</div><div className="detail-title mono">TXN-10482</div><div className="detail-meta">Detected 02:43 AM · 18 June 2025 · Real-time model v4.2</div></div><div className="risk-hero"><div className="score-ring critical"><strong>94</strong><span>/100</span></div><div><Badge tone="critical">CRITICAL RISK</Badge><div className="recommend-inline">FREEZE &amp; INVESTIGATE</div></div></div></div>
-      <div className="fact-grid">
-        {[["Amount","₹84,200","card"],["Merchant","ElectroMart","card"],["Location","Chennai, IN","location"],["Device","DVC-77821","device"],["Account","ACC-9281","users"],["Payout Account","PAY-1032","swap"]].map(([label,value,icon]) => <div className="fact" key={label}><div className="fact-icon"><Icon name={icon as IconName} size={17}/></div><div><span>{label}</span><strong className={label.includes("Account") || label === "Device" ? "mono" : ""}>{value}</strong></div></div>)}
-      </div>
+    <Panel className="transactions-panel"><SectionTitle eyebrow={`${(result.data?.length ?? 0).toLocaleString()} SCORED TRANSACTIONS`} title="Transaction Activity" meta={<Badge tone="info">RANKED BY RISK</Badge>}/>
+      {result.loading || result.error ? <ApiNotice loading={result.loading} error={result.error}/> : rows.length === 0 ? <ApiNotice loading={false} error={false} empty/> : <><TransactionTable rows={rows} limit={100} onSelect={(id) => {selectTransaction(id); setScreen("transaction-detail");}}/><div className="table-footer"><span>Showing {rows.length} highest-risk transactions</span><span>Scores from the trained XGBoost model</span></div></>}
     </Panel>
-    <div className="detail-layout">
-      <div className="detail-main">
-        <Panel><SectionTitle eyebrow="MODEL EXPLAINABILITY · SHAP CONTRIBUTIONS" title="Why was this transaction flagged?" meta={<Badge tone="critical">+94 RISK POINTS</Badge>}/><div className="evidence-list">{evidence.map((item) => <div className="evidence-item" key={item.label}><div className="evidence-score">+{item.score}</div><div className="evidence-content"><div><strong>{item.label}</strong><span>{item.detail}</span></div><div className="contribution-track"><span style={{width: `${item.width}%`}}/></div></div></div>)}</div></Panel>
-        <Panel className="risk-story">
-          <div className="story-accent"><Icon name="pulse" size={22}/></div><SectionTitle eyebrow="AI-GENERATED BEHAVIORAL NARRATIVE" title="AI Risk Story" meta={<Badge tone="info">HIGH CONFIDENCE</Badge>}/>
-          <div className="story-text"><strong className="mono">ACC-9281</strong> normally spends around <strong>₹3,200</strong> between <strong>9 AM and 8 PM</strong> using Device <strong className="mono">D-21</strong>.<br/><br/>This transaction is <mark>significantly higher than normal behavior</mark>, occurred at <mark>2:43 AM</mark>, and originated from a <mark>new device shared with multiple accounts</mark>. Network analysis connects this account to <strong className="link" onClick={() => setScreen("network")}>Fraud Ring R-03 →</strong></div>
-          <div className="story-assessment"><div><span>FINAL ASSESSMENT</span><strong>CRITICAL · 94/100</strong></div><div className="assessment-divider"/><div><span>RECOMMENDED</span><strong>FREEZE &amp; INVESTIGATE</strong></div></div>
-        </Panel>
-      </div>
-      <div className="detail-side">
-        <Panel className="action-card critical-action"><div className="action-icon"><Icon name="shield" size={25}/></div><div className="eyebrow">RECOMMENDED ACTION</div><div className="action-risk">CRITICAL</div><div className="action-title">Freeze &amp;<br/>Investigate</div><p>High transaction risk combined with coordinated network activity.</p><ActionButton tone="danger">FREEZE ACCOUNT</ActionButton><ActionButton onClick={() => setScreen("investigations")}>OPEN INVESTIGATION</ActionButton><ActionButton tone="ghost">MONITOR ONLY</ActionButton></Panel>
-        <Panel><SectionTitle title="Connected intelligence"/><div className="connection-list"><div><Icon name="device"/><span><strong>7 connected accounts</strong>Shared device DVC-77821</span></div><div><Icon name="network"/><span><strong>Fraud Ring R-03</strong>96% match confidence</span></div><div><Icon name="swap"/><span><strong>Payout PAY-1032</strong>Receives from 10 accounts</span></div></div><ActionButton tone="ghost" onClick={() => setScreen("network")}>VIEW NETWORK <span>→</span></ActionButton></Panel>
-      </div>
-    </div>
   </main></>;
 }
 
-const rings = [
-  { id: "RING-001", accounts: 10, devices: 3, payout: 1, risk: 97, status: "Active now" },
-  { id: "RING-002", accounts: 6, devices: 2, payout: 2, risk: 89, status: "Updated 4m ago" },
-  { id: "RING-003", accounts: 8, devices: 4, payout: 1, risk: 91, status: "Updated 11m ago" },
-];
+function TransactionDetail({ transactionId, setScreen }: { transactionId: string; setScreen: (s: string) => void }) {
+  const result = useApiData<TransactionRecord>(transactionId ? `/api/transactions/${encodeURIComponent(transactionId)}` : null);
+  const transaction = result.data;
+  const tone = riskTone(transaction?.risk_score ?? 0);
+  const probabilityPercent = (transaction?.fraud_probability ?? 0) * 100;
+  const currency = (amount: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(amount);
+  return <><AppHeader title="Transaction Investigation" subtitle="Model prediction, contribution-derived reasons and connected-entity context."/><main className="content">
+    <div className="breadcrumb"><span onClick={() => setScreen("transactions")}>Transactions</span><Icon name="chevron" size={13}/><strong className="mono">{transactionId || "Select a transaction"}</strong></div>
+    {result.loading || result.error || !transaction ? <Panel><ApiNotice loading={result.loading} error={result.error} empty={!result.loading && !result.error}/></Panel> : <>
+      <Panel className="transaction-hero">
+        <div className="tx-heading"><div><div className="eyebrow">XGBOOST PREDICTION · {new Date(transaction.timestamp).toLocaleString()}</div><div className="detail-title mono">{transaction.transaction_id}</div><div className="detail-meta">Transaction behavior scored against the trained model and account/network history.</div></div><div className="risk-hero"><div className={`score-ring ${tone}`}><strong>{Math.round(transaction.risk_score)}</strong><span>/100</span></div><div><Badge tone={tone}>{transaction.risk_level} RISK</Badge><div className="recommend-inline">{transaction.recommended_action}</div></div></div></div>
+        <div className="transaction-metrics"><div><span>FRAUD PROBABILITY</span><strong>{probabilityPercent.toFixed(2)}%</strong></div><div><span>RISK SCORE</span><strong>{transaction.risk_score.toFixed(2)}<small> / 100</small></strong></div><div><span>RISK LEVEL</span><strong>{transaction.risk_level}</strong></div></div>
+        <div className="fact-grid">
+          {[['Amount',currency(transaction.amount),'card'],['Account',transaction.account_id,'users'],['Merchant',transaction.merchant,'card'],['Item',transaction.item,'card'],['Location',transaction.location,'location'],['Device',transaction.device_id,'device'],['Payout Account',transaction.payout_account || 'Not provided','swap']].map(([label,value,icon]) => <div className="fact" key={label}><div className="fact-icon"><Icon name={icon as IconName} size={17}/></div><div><span>{label}</span><strong className={label === "Account" || label === "Device" || label === "Payout Account" ? "mono" : ""}>{value}</strong></div></div>)}
+        </div>
+      </Panel>
+      <div className="detail-layout">
+        <div className="detail-main">
+          <Panel><SectionTitle eyebrow="ACTUAL MODEL CONTRIBUTIONS" title="Why is this risky?" meta={<Badge tone={tone}>{transaction.reasons.length} REASONS</Badge>}/>
+            {transaction.reasons.length ? <div className="model-reasons">{transaction.reasons.map((reason, index) => <div className="model-reason" key={`${index}-${reason}`}><span>{String(index + 1).padStart(2, "0")}</span><strong>{formatReason(reason)}</strong></div>)}</div> : <ApiNotice loading={false} error={false} empty/>}
+          </Panel>
+          <Panel className="risk-story"><div className="story-accent"><Icon name="pulse" size={22}/></div><SectionTitle eyebrow="PREDICTION SUMMARY" title="Model assessment"/><div className="story-text">The trained XGBoost model returned a fraud probability of <strong>{probabilityPercent.toFixed(2)}%</strong>. The model decision is <strong>{transaction.is_fraud ? "flagged for review" : "not flagged"}</strong>. Reasons above are generated from positive model feature contributions.</div><div className="story-assessment"><div><span>RISK SCORE</span><strong>{transaction.risk_score.toFixed(2)} / 100</strong></div><div className="assessment-divider"/><div><span>RECOMMENDED</span><strong>{transaction.recommended_action}</strong></div></div></Panel>
+        </div>
+        <div className="detail-side">
+          <Panel className={`action-card ${tone === "critical" || tone === "high" ? "critical-action" : ""}`}><div className="action-icon"><Icon name="shield" size={25}/></div><div className="eyebrow">RECOMMENDED ACTION</div><div className="action-risk">{transaction.risk_level}</div><div className="action-title">{transaction.recommended_action}</div><p>{transaction.is_fraud ? "The model probability crossed the configured fraud threshold." : "The model did not cross the configured fraud threshold."}</p><ActionButton onClick={() => setScreen("investigations")}>VIEW INVESTIGATIONS</ActionButton><ActionButton tone="ghost" onClick={() => setScreen("network")}>VIEW NETWORK</ActionButton></Panel>
+          <Panel><SectionTitle title="Connected entities"/><div className="connection-list">
+            <div><Icon name="users"/><span><strong>{transaction.connected_accounts?.length ?? 0} connected accounts</strong>{transaction.connected_accounts?.length ? transaction.connected_accounts.join(", ") : "No connected accounts returned"}</span></div>
+            <div><Icon name="device"/><span><strong>{transaction.shared_devices?.length ?? 0} connected devices</strong>{transaction.shared_devices?.length ? transaction.shared_devices.join(", ") : "No device relationships returned"}</span></div>
+            <div><Icon name="card"/><span><strong>{transaction.shared_payout_accounts?.length ?? 0} payout relationships</strong>{transaction.shared_payout_accounts?.length ? transaction.shared_payout_accounts.join(", ") : "No payout relationships returned"}</span></div>
+            {transaction.fraud_ring && <div><Icon name="network"/><span><strong>Fraud ring {transaction.fraud_ring.ring_id}</strong>{transaction.fraud_ring.pattern || "Ring context returned by graph analysis"}</span></div>}
+          </div><ActionButton tone="ghost" onClick={() => setScreen("network")}>VIEW FRAUD RINGS →</ActionButton></Panel>
+        </div>
+      </div>
+    </>}
+  </main></>;
+}
 
-function NetworkGraph() {
-  const nodes = [
-    {x:300,y:190,label:"DVC-77821",type:"DEVICE",className:"device",r:34},
-    {x:510,y:190,label:"PAY-1032",type:"PAYOUT",className:"payout",r:38},
-    {x:165,y:100,label:"ACC-9281",type:"ACCOUNT",className:"critical-node",r:32},
-    {x:170,y:270,label:"ACC-10294",type:"ACCOUNT",className:"risk-node",r:30},
-    {x:310,y:65,label:"ACC-4401",type:"ACCOUNT",className:"risk-node",r:28},
-    {x:405,y:300,label:"ACC-2208",type:"ACCOUNT",className:"risk-node",r:29},
-    {x:505,y:65,label:"DVC-21009",type:"DEVICE",className:"device",r:31},
-    {x:635,y:125,label:"ACC-7712",type:"ACCOUNT",className:"normal-node",r:27},
-    {x:640,y:285,label:"CHENNAI",type:"LOCATION",className:"location",r:30},
-  ];
-  const edges = [[0,1],[0,2],[0,3],[0,4],[1,3],[1,5],[1,6],[6,7],[1,8],[5,8],[2,4]];
+function NetworkGraph({ ring }: { ring: RingDetail }) {
+  const members = ring.member_accounts ?? [];
+  const accountNodes = members.map((account, index) => ({
+    id: account.account_id,
+    x: (index + 1) * 760 / (members.length + 1),
+    y: 285,
+    kind: "ACCOUNT",
+  }));
+  const deviceNodes = ring.shared_devices.map((id, index) => ({ id, x: (index + 1) * 760 / (ring.shared_devices.length + 1), y: 88, kind: "DEVICE" }));
+  const payoutNodes = ring.shared_payout_accounts.map((id, index) => ({ id, x: (index + 1) * 760 / (ring.shared_payout_accounts.length + 1), y: 175, kind: "PAYOUT" }));
+  const nodes = [...accountNodes, ...deviceNodes, ...payoutNodes];
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const edges = members.flatMap((account) => [
+    ...account.connections.devices.filter((id) => ring.shared_devices.includes(id)).map((id) => [account.account_id, id] as const),
+    ...account.connections.payout_accounts.filter((id) => ring.shared_payout_accounts.includes(id)).map((id) => [account.account_id, id] as const),
+  ]);
   return <div className="graph">
-    <svg viewBox="0 0 760 370" role="img" aria-label="Fraud ring relationship graph">
-      <defs><filter id="soft"><feGaussianBlur stdDeviation="4"/></filter></defs>
-      <g className="edges">{edges.map(([a,b],i) => <line key={i} x1={nodes[a].x} y1={nodes[a].y} x2={nodes[b].x} y2={nodes[b].y} className={i < 7 ? "suspicious-edge" : ""}/>)}</g>
-      {nodes.map((node) => <g key={node.label} className={`graph-node ${node.className}`} transform={`translate(${node.x} ${node.y})`}><circle className="node-halo" r={node.r+9}/><circle r={node.r}/><text className="node-type" textAnchor="middle" y="-4">{node.type}</text><text className="node-label" textAnchor="middle" y="11">{node.label}</text></g>)}
+    <svg viewBox="0 0 760 370" role="img" aria-label={`Real account, device and payout relationships for ${ring.ring_id}`}>
+      <g className="edges">{edges.map(([from, to], index) => {
+        const start = nodeById.get(from);
+        const end = nodeById.get(to);
+        return start && end ? <line key={`${from}-${to}-${index}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} className="suspicious-edge"/> : null;
+      })}</g>
+      {nodes.map((node) => <g key={`${node.kind}-${node.id}`} className={`graph-node ${node.kind === "ACCOUNT" ? "critical-node" : node.kind.toLowerCase()}`} transform={`translate(${node.x} ${node.y})`}><circle className="node-halo" r="28"/><circle r="19"/><text className="node-type" textAnchor="middle" y="-3">{node.kind}</text><text className="node-label" textAnchor="middle" y="9">{node.id}</text></g>)}
     </svg>
-    <div className="graph-legend"><span><i className="account"/>Account</span><span><i className="device"/>Device</span><span><i className="payout"/>Payout</span><span><i className="location"/>Location</span></div>
-    <div className="graph-zoom"><span>＋</span><span>−</span><span>⌂</span></div>
+    <div className="graph-legend"><span><i className="account"/>Member account</span><span><i className="device"/>Shared device</span><span><i className="payout"/>Shared payout</span></div>
   </div>;
 }
 
 function NetworkScreen({ setScreen }: { setScreen: (s: string) => void }) {
-  const [selectedRing, setSelectedRing] = useState("RING-001");
+  const ringsResult = useApiData<RingSummary[]>("/api/fraud-rings");
+  const [selectedRing, setSelectedRing] = useState<string | null>(null);
+  const rings = ringsResult.data ?? [];
+  const activeRingId = selectedRing ?? rings[0]?.ring_id ?? null;
+  const detailResult = useApiData<RingDetail>(activeRingId ? `/api/fraud-rings/${encodeURIComponent(activeRingId)}` : null);
+  const ring = detailResult.data;
   return <><AppHeader title="Fraud Network Intelligence" subtitle="Detect coordinated fraud through account, device and payout relationships."/><main className="content network-page">
-    <div className="network-toolbar"><div className="table-controls"><Filter label="Search account, device, payout…" wide/><Filter label="Active rings"/><Filter label="Risk: High + Critical"/></div><div className="graph-toggle"><span className="toggle on"><i/></span><span>Show normal connections</span></div></div>
     <div className="network-layout">
-      <Panel className="rings-panel"><SectionTitle eyebrow="6 ACTIVE CLUSTERS" title="Detected Fraud Rings"/><div className="ring-list">{rings.map((ring) => <div className={`ring-card ${selectedRing === ring.id ? "selected" : ""}`} role="button" tabIndex={0} onClick={() => setSelectedRing(ring.id)} key={ring.id}>
-        <div className="ring-head"><div><span className="mono">{ring.id}</span><small>{ring.status}</small></div><div className="ring-risk"><strong>{ring.risk}</strong><span>RISK</span></div></div>
-        <div className="ring-stats"><span><strong>{ring.accounts}</strong> Accounts</span><span><strong>{ring.devices}</strong> Devices</span><span><strong>{ring.payout}</strong> Payout</span></div>
-      </div>)}</div><ActionButton tone="ghost">VIEW ALL 6 RINGS <span>→</span></ActionButton></Panel>
-      <Panel className="graph-panel"><div className="graph-head"><div><div className="eyebrow">SELECTED NETWORK</div><div className="section-title">{selectedRing}</div></div><div className="table-controls"><Filter label="All node types"/><ActionButton tone="ghost">RESET VIEW</ActionButton></div></div><NetworkGraph/></Panel>
+      <Panel className="rings-panel"><SectionTitle eyebrow={`${rings.length} DETECTED`} title="Fraud Rings"/>
+        {ringsResult.loading || ringsResult.error ? <ApiNotice loading={ringsResult.loading} error={ringsResult.error}/> : rings.length === 0 ? <ApiNotice loading={false} error={false} empty/> : <div className="ring-list">{rings.map((item) => <div className={`ring-card ${activeRingId === item.ring_id ? "selected" : ""}`} role="button" tabIndex={0} onClick={() => setSelectedRing(item.ring_id)} key={item.ring_id}>
+          <div className="ring-head"><div><span className="mono">{item.ring_id}</span><small>{item.flagged_txns.toLocaleString()} flagged transactions</small></div><div className="ring-risk"><strong>{Math.round(item.ring_score * 100)}</strong><span>RISK</span></div></div>
+          <div className="ring-stats"><span><strong>{item.member_count ?? item.accounts.length}</strong> Accounts</span><span><strong>{item.shared_devices.length}</strong> Devices</span><span><strong>{item.shared_payout_accounts.length}</strong> Payouts</span></div>
+        </div>)}</div>}
+      </Panel>
+      <Panel className="graph-panel"><div className="graph-head"><div><div className="eyebrow">SAVED GRAPH OUTPUT · SELECTED RING</div><div className="section-title">{activeRingId ?? "No detected ring"}</div></div></div>
+        {detailResult.loading || detailResult.error ? <ApiNotice loading={detailResult.loading} error={detailResult.error}/> : ring ? <NetworkGraph ring={ring}/> : <ApiNotice loading={false} error={false} empty/>}
+      </Panel>
     </div>
-    <div className="network-insights">
-      <Panel className="pattern-card"><div className="pattern-icon"><Icon name="network" size={25}/></div><div className="eyebrow cyan">PATTERN DETECTED · 96% CONFIDENCE</div><div className="pattern-title">10 accounts share 3 devices<br/>and 1 payout account.</div><div className="pattern-details"><div><span>BEHAVIORAL PATTERN</span><strong>Similar electronics purchased in the same sequence.</strong></div><div><span>NETWORK PATTERN</span><strong>Multiple accounts converge on payout PAY-1032.</strong></div></div><ActionButton onClick={() => setScreen("investigations")}>OPEN INVESTIGATION <span>→</span></ActionButton></Panel>
-      <Panel className="action-card network-action"><div className="action-icon"><Icon name="shield" size={25}/></div><div className="eyebrow">RECOMMENDED ACTION</div><div className="action-risk">CRITICAL</div><div className="action-title">Freeze &amp; Investigate</div><p>High transaction risk combined with coordinated network activity and a shared payout account.</p><div className="action-buttons"><ActionButton tone="danger">FREEZE ACCOUNTS</ActionButton><ActionButton onClick={() => setScreen("investigations")}>OPEN CASE</ActionButton><ActionButton tone="ghost">MONITOR</ActionButton></div></Panel>
+    {ring && <div className="network-insights">
+      <Panel className="pattern-card"><div className="pattern-icon"><Icon name="network" size={25}/></div><div className="eyebrow cyan">GRAPH-CORROBORATED ACTIVITY</div><div className="pattern-title">{ring.pattern}</div><div className="pattern-details"><div><span>SUSPICIOUS ACTIVITY</span><strong>{ring.flagged_txns.toLocaleString()} flagged transactions · {new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(ring.flagged_amount)}</strong></div><div><span>COMMON ITEM SEQUENCE</span><strong>{ring.common_sequence.join(" → ") || "No common sequence recorded"}</strong></div></div><ActionButton onClick={() => setScreen("investigations")}>OPEN INVESTIGATIONS →</ActionButton></Panel>
+      <Panel className="action-card network-action"><div className="action-icon"><Icon name="shield" size={25}/></div><div className="eyebrow">RECOMMENDED ACTION</div><div className="action-risk">RISK {Math.round(ring.ring_score * 100)}</div><div className="action-title">{ring.action}</div><p>Action and risk are taken from the generated fraud-ring output.</p><ActionButton onClick={() => setScreen("investigations")}>REVIEW INVESTIGATIONS</ActionButton></Panel>
+    </div>}
+  </main></>;
+}
+
+function Investigations({ setScreen, selectTransaction }: { setScreen: (s: string) => void; selectTransaction: (id: string) => void }) {
+  const listResult = useApiData<{ investigations: InvestigationSummary[] }>("/api/investigations");
+  const investigations = listResult.data?.investigations ?? [];
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const activeId = selectedId ?? investigations[0]?.investigation_id ?? null;
+  const detailResult = useApiData<InvestigationDetail>(activeId ? `/api/investigations/${encodeURIComponent(activeId)}` : null);
+  const detail = detailResult.data;
+  return <><AppHeader title="Investigation Workspace" subtitle="Actual flagged events, connected entities and risk-engine recommendations."/><main className="content">
+    <div className="investigation-layout">
+      <Panel className="rings-panel"><SectionTitle eyebrow={`${investigations.length} CASES`} title="Open Investigations"/>
+        {listResult.loading || listResult.error ? <ApiNotice loading={listResult.loading} error={listResult.error}/> : investigations.length === 0 ? <ApiNotice loading={false} error={false} empty/> : <div className="ring-list">{investigations.map((item) => <div key={item.investigation_id} className={`ring-card ${activeId === item.investigation_id ? "selected" : ""}`} role="button" tabIndex={0} onClick={() => setSelectedId(item.investigation_id)}>
+          <div className="ring-head"><div><span className="mono">{item.investigation_id}</span><small>{item.account_id} · {item.transaction_id}</small></div><div className={`ring-risk ${riskTone(item.risk_score)}`}><strong>{Math.round(item.risk_score)}</strong><span>/100</span></div></div>
+          <div className="ring-stats"><span><strong>{item.flagged_transactions}</strong> Flagged</span><span><strong>{item.ring_id ?? "None"}</strong> Ring</span></div>
+        </div>)}</div>}
+      </Panel>
+      <div className="case-main">
+        {detailResult.loading || detailResult.error || !detail ? <Panel><ApiNotice loading={detailResult.loading} error={detailResult.error} empty={!detailResult.loading && !detailResult.error}/></Panel> : <>
+          <Panel className="case-header"><div><div className="eyebrow">INVESTIGATION · {detail.account_id}</div><div className="case-title"><span className="mono">{detail.investigation_id}</span><Badge tone={riskTone(detail.risk_score)}>{detail.status}</Badge></div><p>Lead transaction <span className="mono">{detail.transaction_id}</span>{detail.ring_id ? ` · ${detail.ring_id}` : ""}</p></div><div className="case-meta"><div><span>RISK SCORE</span><strong>{detail.risk_score.toFixed(2)} / 100</strong></div><div><span>LAST ACTIVITY</span><strong>{detail.last_activity ? new Date(detail.last_activity).toLocaleString() : "Not available"}</strong></div></div></Panel>
+          <div className="case-layout"><div className="case-main">
+            <Panel><SectionTitle eyebrow={`${detail.timeline.length} MODEL-FLAGGED EVENTS`} title="Risk Timeline"/><div className="timeline">{detail.timeline.map((event, index) => <div className={`timeline-item ${index === detail.timeline.length - 1 ? "active" : ""}`} key={`${event.transaction_id}-${event.timestamp}`}><div className="timeline-time">{new Date(event.timestamp).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</div><div className="timeline-track"><span/><i/></div><div><strong>{event.event} · {event.risk_score.toFixed(1)}</strong><p><span className="mono">{event.transaction_id}</span> · {formatReason(event.description)}</p></div></div>)}</div></Panel>
+            <Panel><SectionTitle eyebrow="REAL TRANSACTION EVIDENCE" title="Flagged Transactions"/><div className="case-evidence">{detail.transactions.length ? detail.transactions.map((transaction) => <div className="evidence-callout" key={transaction.transaction_id} role="button" tabIndex={0} onClick={() => { selectTransaction(transaction.transaction_id); setScreen("transaction-detail"); }}><Icon name="shield"/><div><strong className="mono">{transaction.transaction_id} · {transaction.risk_level}</strong><span>{transaction.reasons.map(formatReason).join(" · ") || "No positive reasons returned"}</span></div><Badge tone={riskTone(transaction.risk_score)}>{transaction.risk_score.toFixed(1)}</Badge></div>) : <ApiNotice loading={false} error={false} empty/>}</div></Panel>
+          </div><div className="case-side">
+            <Panel className={`action-card ${riskTone(detail.risk_score) === "critical" ? "critical-action" : ""}`}><div className="action-icon"><Icon name="shield" size={25}/></div><div className="eyebrow">RISK-ENGINE RECOMMENDATION</div><div className="action-risk">{detail.risk_score.toFixed(1)} / 100</div><div className="action-title">{detail.recommendation}</div><p>{detail.top_reason ? formatReason(detail.top_reason) : "No top reason returned by the saved model output."}</p><Badge tone={riskTone(detail.risk_score)}>{detail.status}</Badge></Panel>
+            <Panel><SectionTitle title="Connected entities"/><div className="connection-list">
+              <div><Icon name="users"/><span><strong>{detail.connected_entities.connected_accounts.length} connected accounts</strong>{detail.connected_entities.connected_accounts.join(", ") || "None returned"}</span></div>
+              <div><Icon name="device"/><span><strong>{detail.connected_entities.devices.length} devices</strong>{detail.connected_entities.devices.join(", ") || "None returned"}</span></div>
+              <div><Icon name="card"/><span><strong>{detail.connected_entities.payout_accounts.length} payout accounts</strong>{detail.connected_entities.payout_accounts.join(", ") || "None returned"}</span></div>
+            </div>{detail.ring_id && <ActionButton tone="ghost" onClick={() => setScreen("network")}>VIEW {detail.ring_id} NETWORK</ActionButton>}</Panel>
+          </div></div>
+        </>}
+      </div>
     </div>
   </main></>;
 }
 
-function Investigations() {
-  const timeline = [
-    ["02:31 AM","New device detected","DVC-77821 first observed on account ACC-9281"],
-    ["02:37 AM","Unusual transaction initiated","Amount exceeds behavioral baseline by 4.8×"],
-    ["02:43 AM","High-risk transaction detected","TXN-10482 scored critical at 94/100"],
-    ["02:44 AM","Network relationship identified","Device linked to seven additional accounts"],
-    ["02:45 AM","Fraud ring correlation detected","96% match to active network RING-001"],
-  ];
-  return <><AppHeader title="Investigation Workspace" subtitle="Consolidated evidence, chronology and analyst decisioning."/><main className="content">
-    <Panel className="case-header"><div><div className="eyebrow">ACTIVE CASE</div><div className="case-title"><span className="mono">INV-00291</span><Badge tone="critical">CRITICAL</Badge><Badge tone="info">OPEN</Badge></div><p>Coordinated account takeover and payout convergence</p></div><div className="case-meta"><div><span>ASSIGNED TO</span><strong>Arjun Shah</strong></div><div><span>OPENED</span><strong>18 Jun · 02:45 AM</strong></div><ActionButton tone="ghost">ADD NOTE</ActionButton></div></Panel>
-    <div className="case-layout"><div className="case-main">
-      <Panel><SectionTitle eyebrow="5 CORRELATED EVENTS" title="Risk Timeline"/><div className="timeline">{timeline.map((event,i) => <div className={`timeline-item ${i === timeline.length-1 ? "active" : ""}`} key={event[0]}><div className="timeline-time">{event[0]}</div><div className="timeline-track"><span/><i/></div><div><strong>{event[1]}</strong><p>{event[2]}</p></div></div>)}</div></Panel>
-      <Panel><SectionTitle eyebrow="EVIDENCE SUMMARY" title="Investigation Evidence"/><div className="evidence-tabs"><span className="active">Transactions <b>4</b></span><span>Accounts <b>10</b></span><span>Devices <b>3</b></span><span>AI Explanation</span></div><div className="case-evidence"><div className="evidence-callout"><Icon name="shield"/><div><strong>Critical transaction</strong><span className="mono">TXN-10482 · ACC-9281 · ₹84,200</span></div><Badge tone="critical">94/100</Badge></div><p>Transaction was initiated from a newly observed device at an anomalous time and shares payout infrastructure with nine other accounts.</p></div></Panel>
-    </div><div className="case-side"><Panel className="action-card critical-action"><div className="action-icon"><Icon name="shield" size={25}/></div><div className="eyebrow">FINAL RECOMMENDATION</div><div className="action-risk">CRITICAL</div><div className="action-title">Freeze &amp;<br/>Investigate</div><div className="confidence"><span>AI CONFIDENCE</span><strong>96%</strong></div><ActionButton tone="danger">FREEZE 10 ACCOUNTS</ActionButton><ActionButton>ESCALATE CASE</ActionButton><ActionButton tone="ghost">MARK FALSE POSITIVE</ActionButton></Panel>
-      <Panel><SectionTitle title="Investigation notes" meta={<span className="small-meta">2 notes</span>}/><div className="note"><div className="avatar xs">AS</div><div><strong>Arjun Shah <span>· 02:51</span></strong><p>Pattern aligns with device-farm activity. Awaiting payout verification.</p></div></div><div className="note-field">Add investigation note…</div></Panel>
-    </div></div>
+function Accounts() {
+  const result = useApiData<AccountRecord[]>("/api/accounts");
+  const accounts = result.data ?? [];
+  return <><AppHeader title="Account Intelligence" subtitle="Model risk, transaction history and verified account relationships."/><main className="content">
+    <Panel className="transactions-panel"><SectionTitle eyebrow={`${accounts.length.toLocaleString()} ACCOUNTS`} title="Account Risk Monitor" meta={<Badge tone="info">LIVE API DATA</Badge>}/>
+      {result.loading || result.error ? <ApiNotice loading={result.loading} error={result.error}/> : accounts.length === 0 ? <ApiNotice loading={false} error={false} empty/> : <div className="table-wrap"><table><thead><tr><th>Account</th><th>Risk score / level</th><th>Transactions</th><th>High-risk</th><th>Connected accounts</th><th>Connected devices</th><th>Payout relationships</th><th>Status / action</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.account_id}>
+        <td className="mono primary-id">{account.account_id}{account.ring_id && <span className="row-time">{account.ring_id}</span>}</td>
+        <td><div className={`account-score ${riskTone(account.risk_score)}`}>{account.risk_score.toFixed(1)}<span>/100</span></div><span className="row-time">{account.risk_level}</span></td>
+        <td>{account.transaction_count.toLocaleString()}</td><td>{account.high_risk_transactions.toLocaleString()}</td>
+        <td title={account.connected_accounts.join(", ")}>{account.connected_accounts.length}<span className="row-time">{account.connected_accounts.slice(0, 3).join(", ") || "None"}</span></td>
+        <td title={account.connected_devices.join(", ")}>{account.connected_devices.length}<span className="row-time">{account.connected_devices.slice(0, 3).join(", ") || "None"}</span></td>
+        <td title={account.payout_accounts.join(", ")}>{account.payout_accounts.length}<span className="row-time">{account.payout_accounts.slice(0, 2).join(", ") || "None"}</span></td>
+        <td><Badge tone={riskTone(account.risk_score)}>{account.status}</Badge><span className="row-time">{account.recommended_action}</span>{account.reason && <span className="row-time" title={account.reason}>{account.reason}</span>}</td>
+      </tr>)}</tbody></table></div>}
+    </Panel>
   </main></>;
-}
-
-function Accounts({ setScreen }: { setScreen: (s: string) => void }) {
-  const accounts = [
-    ["ACC-10294","91","42","7","12","UNDER INVESTIGATION","critical"],
-    ["ACC-9281","94","36","5","10","FROZEN","critical"],
-    ["ACC-2208","76","63","3","8","MANUAL REVIEW","high"],
-    ["ACC-1823","61","18","2","4","MONITORING","medium"],
-    ["ACC-5512","08","28","0","2","NORMAL","safe"],
-  ];
-  return <><AppHeader title="Account Intelligence" subtitle="Monitor account behavior, risk and network relationships."/><main className="content"><Panel className="filter-panel"><div className="filter-grid account-filters"><Filter label="Search account ID…" wide/><Filter label="All risk levels"/><Filter label="All statuses"/><Filter label="Connected accounts"/><ActionButton tone="ghost" icon="filter">Clear filters</ActionButton></div></Panel><Panel className="transactions-panel"><SectionTitle eyebrow="84 ACCOUNTS AT RISK" title="Account Risk Monitor"/><div className="table-wrap"><table><thead><tr><th>Account</th><th>Risk Score</th><th>Transactions</th><th>High-Risk Events</th><th>Connections</th><th>Status</th><th></th></tr></thead><tbody>{accounts.map(a => <tr key={a[0]} onClick={() => a[0] === "ACC-9281" && setScreen("transaction-detail")}><td className="mono primary-id">{a[0]}</td><td><div className={`account-score ${a[6]}`}>{a[1]}<span>/100</span></div></td><td>{a[2]}</td><td>{a[3]}</td><td>{a[4]}</td><td><Badge tone={a[6] as Risk}>{a[5]}</Badge></td><td><Icon name="chevron" size={15}/></td></tr>)}</tbody></table></div></Panel></main></>;
 }
 
 function ModelInsights() {
   return <><AppHeader title="Model Intelligence" subtitle="Understand how the fraud detection system performs."/><main className="content">
     <div className="model-kpis">{[["Precision","96.2%","+1.1%"],["Recall","93.8%","+0.6%"],["PR-AUC","95.1%","+0.8%"],["False Positive Rate","1.8%","−0.3%"]].map(v => <Panel className="model-kpi" key={v[0]}><span>{v[0]}</span><strong>{v[1]}</strong><small>{v[2]} vs previous version</small></Panel>)}</div>
     <div className="model-layout"><Panel><SectionTitle eyebrow="VALIDATION SET · LAST 30 DAYS" title="Model Comparison" meta={<Badge tone="info">v4.2 ACTIVE</Badge>}/><div className="model-table"><div className="model-row header"><span>MODEL</span><span>PRECISION</span><span>RECALL</span><span>PR-AUC</span></div>{[["Logistic Regression","88.4%","84.2%","86.1%"],["XGBoost","95.6%","92.7%","94.4%"],["CatBoost","96.2%","93.8%","95.1%"]].map((m,i) => <div className={`model-row ${i===2?"active":""}`} key={m[0]}><span>{m[0]} {i===2 && <Badge tone="safe">ACTIVE</Badge>}</span><strong>{m[1]}</strong><strong>{m[2]}</strong><strong>{m[3]}</strong></div>)}</div><p className="model-note">Performance metrics shown from the current validation set. Production selection remains subject to drift and fairness review.</p></Panel>
-    <Panel><SectionTitle eyebrow="GLOBAL FEATURE IMPORTANCE" title="Top Risk Factors"/><div className="factors">{[["Amount anomaly",31],["New device",24],["Transaction timing",18],["Shared device",15],["Network behavior",12]].map((f,i) => <div className="factor" key={f[0]}><div><span>{f[0]}</span><strong>{f[1]}%</strong></div><div className="factor-bar"><span style={{width:`${f[1]*3}%`}} className={`factor-${i}`}/></div></div>)}</div></Panel></div>
+    <Panel><SectionTitle eyebrow="GLOBAL FEATURE IMPORTANCE" title="Top Risk Factors"/><div className="factors">{([["Amount anomaly",31],["New device",24],["Transaction timing",18],["Shared device",15],["Network behavior",12]] as [string, number][]).map((f,i) => <div className="factor" key={f[0]}><div><span>{f[0]}</span><strong>{f[1]}%</strong></div><div className="factor-bar"><span style={{width:`${f[1]*3}%`}} className={`factor-${i}`}/></div></div>)}</div></Panel></div>
   </main></>;
 }
 
@@ -471,7 +680,7 @@ function App() {
   const [entryPage, setEntryPage] = useState<EntryPage>(initialPage);
   const [screen, setScreen] = useState("command");
   const [compact, setCompact] = useState(false);
-  const [, setSelectedTransaction] = useState("TXN-10482");
+  const [selectedTransaction, setSelectedTransaction] = useState("");
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname;
@@ -487,13 +696,13 @@ function App() {
   };
   const content = useMemo(() => {
     if (screen === "transactions") return <Transactions setScreen={setScreen} selectTransaction={setSelectedTransaction}/>;
-    if (screen === "transaction-detail") return <TransactionDetail setScreen={setScreen}/>;
-    if (screen === "accounts") return <Accounts setScreen={setScreen}/>;
+    if (screen === "transaction-detail") return <TransactionDetail transactionId={selectedTransaction} setScreen={setScreen}/>;
+    if (screen === "accounts") return <Accounts/>;
     if (screen === "network") return <NetworkScreen setScreen={setScreen}/>;
-    if (screen === "investigations") return <Investigations/>;
+    if (screen === "investigations") return <Investigations setScreen={setScreen} selectTransaction={setSelectedTransaction}/>;
     if (screen === "model") return <ModelInsights/>;
     return <CommandCenter setScreen={setScreen} selectTransaction={setSelectedTransaction}/>;
-  }, [screen]);
+  }, [screen, selectedTransaction]);
   if (entryPage === "home") return <HomePage onNavigate={navigateEntry}/>;
   if (entryPage === "login") return <LoginPage onNavigate={navigateEntry} onSuccess={() => { window.history.pushState({}, "", "/dashboard"); setEntryPage("transition"); }}/>;
   if (entryPage === "register") return <RegisterPage onNavigate={navigateEntry}/>;
